@@ -45,12 +45,12 @@ const supabase = {
 const STRIPE_KEY = "pk_live_51TZvFr8YdgY75kddI3aVTkfM52hpfzJvEKFWWWkrhaLtNximJ8fHYceAFvFatc2ODX3rPu0Q9ZnOy0d41SQp1elO00uJuUJOwk";
 
 // ── SERVICE WORKER REGISTRATION ──────────────────────────
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
+function registerSW() {
+  if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").then(reg => {
       console.log("SW registered:", reg.scope);
     }).catch(err => console.log("SW failed:", err));
-  });
+  }
 }
 
 // ── PWA PUSH NOTIFICATIONS ────────────────────────────────
@@ -690,6 +690,8 @@ export default function SproutApp() {
       setIsLoading(false);
     };
     init();
+    // Register Service Worker
+    registerSW();
   }, []);
 
   // ── Persist — debounced Supabase sync ──
@@ -992,7 +994,7 @@ export default function SproutApp() {
         <h1 style={{ fontSize:46, fontWeight:800, color:t.text, margin:"0 0 6px", letterSpacing:"-1px" }}>Sprout</h1>
         <p style={{ fontSize:13, color:t.accent, fontWeight:700, margin:"0 0 14px", letterSpacing:2, textTransform:"uppercase" }}>Your child's growth journal</p>
         <p style={{ fontSize:15, color:t.text, opacity:0.65, lineHeight:1.7, margin:"0 0 40px" }}>Track behaviors, celebrate progress, and watch your little one bloom — one day at a time.</p>
-        <button onClick={()=>setStep(0.5)} style={{ background:t.primary, color:"#fff", border:"none", borderRadius:16, padding:"16px 48px", fontSize:17, fontWeight:700, cursor:"pointer", fontFamily:f, width:"100%" }}>
+        <button onClick={()=>setStep("mode_select")} style={{ background:t.primary, color:"#fff", border:"none", borderRadius:16, padding:"16px 48px", fontSize:17, fontWeight:700, cursor:"pointer", fontFamily:f, width:"100%" }}>
           Let's Begin 🌿
         </button>
         <p style={{ fontSize:12, color:t.text, opacity:0.35, marginTop:14 }}>Free to start · No credit card needed</p>
@@ -1000,7 +1002,7 @@ export default function SproutApp() {
     </div>
   );
 
-  if (step === 0.5) return (
+  if (step === "mode_select") return (
     <div style={{ minHeight:"100vh", background:`linear-gradient(135deg,${t.bg},${t.secondary})`, fontFamily:f, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24 }}>
       {GFONTS}<style>{CSS}</style>
       <div style={{ textAlign:"center", maxWidth:360, animation:"fadeUp 0.5s ease" }}>
