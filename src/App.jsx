@@ -44,7 +44,16 @@ const supabase = {
 // ── STRIPE ───────────────────────────────────────────────
 const STRIPE_KEY = "pk_live_51TZvFr8YdgY75kddI3aVTkfM52hpfzJvEKFWWWkrhaLtNximJ8fHYceAFvFatc2ODX3rPu0Q9ZnOy0d41SQp1elO00uJuUJOwk";
 
-// ── WEB PUSH NOTIFICATIONS ───────────────────────────────
+// ── SERVICE WORKER REGISTRATION ──────────────────────────
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").then(reg => {
+      console.log("SW registered:", reg.scope);
+    }).catch(err => console.log("SW failed:", err));
+  });
+}
+
+// ── PWA PUSH NOTIFICATIONS ────────────────────────────────
 async function requestPushPermission() {
   if (!("Notification" in window)) return false;
   if (Notification.permission === "granted") return true;
@@ -52,24 +61,38 @@ async function requestPushPermission() {
   return result === "granted";
 }
 
-function scheduleMedReminder(medName, timeLabel) {
+// Send scheduled notification via Service Worker (works when app is closed)
+async function scheduleViaSW(title, body, delayMs) {
+  if ("serviceWorker" in navigator) {
+    const reg = await navigator.serviceWorker.ready;
+    if (reg.active) {
+      reg.active.postMessage({ type: "SCHEDULE_NOTIFICATION", title, body, delayMs });
+      return true;
+    }
+  }
+  // Fallback: setTimeout (only works while app is open)
+  setTimeout(() => {
+    if (Notification.permission === "granted") {
+      new Notification(title, { body, icon: "/icon-192.png" });
+    }
+  }, delayMs);
+  return false;
+}
+
+function scheduleMedReminder(medName, timeLabel, customTime) {
   if (Notification.permission !== "granted") return;
   const timeMap = { Morning:"08:00", Afternoon:"13:00", Evening:"18:00", Bedtime:"21:00" };
-  const target = timeMap[timeLabel] || "08:00";
+  const target = customTime || timeMap[timeLabel] || "08:00";
   const [h, m] = target.split(":").map(Number);
   const now = new Date();
   const fire = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0);
   if (fire <= now) fire.setDate(fire.getDate() + 1);
   const delay = fire - now;
-  setTimeout(() => {
-    new Notification("💊 Medication Reminder", {
-      body: `Time to give ${medName} (${timeLabel})`,
-      icon: "/sprout.svg",
-      badge: "/sprout.svg",
-    });
-    // reschedule for next day
-    scheduleMedReminder(medName, timeLabel);
-  }, delay);
+  scheduleViaSW(
+    "💊 Vitamin Reminder",
+    `Time to give ${medName} — ${timeLabel}`,
+    delay
+  );
 }
 
 function scheduleApptReminder(title, time, period) {
@@ -79,16 +102,14 @@ function scheduleApptReminder(title, time, period) {
   if (period === "PM" && h !== 12) hour = h + 12;
   if (period === "AM" && h === 12) hour = 0;
   const now = new Date();
-  const fire = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, m - 15, 0);
+  const fire = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, Math.max(0, m - 15), 0);
   if (fire <= now) fire.setDate(fire.getDate() + 1);
   const delay = fire - now;
-  setTimeout(() => {
-    new Notification("📅 Appointment Reminder", {
-      body: `${title} starts in 15 minutes!`,
-      icon: "/sprout.svg",
-    });
-    scheduleApptReminder(title, time, period);
-  }, delay);
+  scheduleViaSW(
+    "📅 Appointment Reminder",
+    `${title} starts in 15 minutes!`,
+    delay
+  );
 }
 
 // Device ID — unique per device (stored in sessionStorage as fallback)
@@ -603,7 +624,7 @@ export default function SproutApp() {
   const [medEffects,     setMedEffects]     = useState(saved?.medEffects     || {});
   const [medSideEffects, setMedSideEffects] = useState(saved?.medSideEffects || {});
   const [showMedForm,    setShowMedForm]    = useState(false);
-  const [newMed, setNewMed] = useState({ name:"", dose:"", times:["Morning"], type:"regular" });
+  const [newMed, setNewMed] = useState({ name:"", dose:"", times:["Morning"], type:"regular", customTimes:{"Morning":"08:00","Afternoon":"13:00","Evening":"18:00","Bedtime":"21:00"} });
 
   // ── Nutrition ──
   const [nutritionLogs,     setNutritionLogs]     = useState(saved?.nutritionLogs     || []);
@@ -733,8 +754,8 @@ export default function SproutApp() {
     if (!newMed.name) return;
     const med = { ...newMed, id: Date.now() };
     setMedications(prev => [...prev, med]);
-    if (pushEnabled) med.times.forEach(t => scheduleMedReminder(med.name, t));
-    setNewMed({ name:"", dose:"", times:["Morning"], type:"regular" });
+    if (pushEnabled) med.times.forEach(t => scheduleMedReminder(med.name, t, med.customTimes?.[t]));
+    setNewMed({ name:"", dose:"", times:["Morning"], type:"regular", customTimes:{"Morning":"08:00","Afternoon":"13:00","Evening":"18:00","Bedtime":"21:00"} });
     setShowMedForm(false);
     setActiveTab("track"); setTrackSubTab("meds");
   };
@@ -1266,9 +1287,12 @@ export default function SproutApp() {
 
       {/* ── PUSH NOTIFICATION PROMPT ── */}
       {!pushEnabled && step === 5 && (
-        <div style={{ background:"#FEF6EE", padding:"10px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", borderBottom:`1px solid ${t.soft}` }}>
-          <span style={{ fontSize:12, color:t.text, opacity:0.75 }}>💊 Enable medication reminders?</span>
-          <span onClick={enablePush} style={{ fontSize:11, fontWeight:800, color:t.accent, cursor:"pointer", background:`${t.primary}18`, borderRadius:8, padding:"4px 10px" }}>Enable</span>
+        <div style={{ background:`linear-gradient(90deg,${t.primary}22,${t.accent}22)`, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", borderBottom:`1px solid ${t.soft}` }}>
+          <div>
+            <div style={{ fontSize:13, fontWeight:800, color:t.text, marginBottom:2 }}>🔔 Enable Reminders</div>
+            <div style={{ fontSize:11, color:t.text, opacity:0.6 }}>Get notified for vitamins & appointments</div>
+          </div>
+          <div onClick={enablePush} style={{ fontSize:12, fontWeight:800, color:"#fff", cursor:"pointer", background:t.primary, borderRadius:10, padding:"8px 14px", whiteSpace:"nowrap" }}>Turn On</div>
         </div>
       )}
 
@@ -1624,15 +1648,23 @@ export default function SproutApp() {
                   <Field label="Name *" value={newMed.name} onChange={v=>setNewMed(p=>({...p,name:v}))} placeholder="e.g. Vitamin D3"/>
                   <Field label="Dose" value={newMed.dose} onChange={v=>setNewMed(p=>({...p,dose:v}))} placeholder="e.g. 1000 IU"/>
                   <div style={{ marginBottom:14 }}>
-                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>When</label>
-                    <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                      {medTimes.map(tm=>(
-                        <div key={tm} onClick={()=>setNewMed(p=>({...p,times:p.times.includes(tm)?p.times.filter(x=>x!==tm):[...p.times,tm]}))}
-                          style={{ padding:"8px 14px", borderRadius:10, background:newMed.times.includes(tm)?t.primary:t.secondary, color:newMed.times.includes(tm)?"#fff":t.text, fontSize:13, fontWeight:700, cursor:"pointer" }}>
-                          {tm}
+                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Reminder Times</label>
+                    {medTimes.map(tm=>(
+                      <div key={tm} style={{ marginBottom:10 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: newMed.times.includes(tm)?8:0 }}>
+                          <div onClick={()=>setNewMed(p=>({...p,times:p.times.includes(tm)?p.times.filter(x=>x!==tm):[...p.times,tm]}))}
+                            style={{ width:22, height:22, borderRadius:6, border:`2px solid ${newMed.times.includes(tm)?t.primary:t.soft}`, background:newMed.times.includes(tm)?t.primary:"transparent", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", flexShrink:0 }}>
+                            {newMed.times.includes(tm) && <span style={{ color:"#fff", fontSize:13, fontWeight:800 }}>✓</span>}
+                          </div>
+                          <span style={{ fontSize:14, fontWeight:700, color:newMed.times.includes(tm)?t.text:t.text, opacity:newMed.times.includes(tm)?1:0.45 }}>{tm}</span>
+                          {newMed.times.includes(tm) && (
+                            <input type="time" value={newMed.customTimes?.[tm]||"08:00"}
+                              onChange={e=>setNewMed(p=>({...p,customTimes:{...p.customTimes,[tm]:e.target.value}}))}
+                              style={{ marginLeft:"auto", padding:"6px 10px", borderRadius:10, border:`2px solid ${t.primary}`, background:t.secondary, fontSize:14, color:t.text, outline:"none", fontFamily:f }}/>
+                          )}
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
                   <div style={{ display:"flex", gap:8 }}>
                     <button onClick={addMedication} style={{ flex:1, background:t.primary, color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:f }}>Save ✓</button>
@@ -1804,13 +1836,23 @@ export default function SproutApp() {
                       onFocus={e=>e.target.style.borderColor=t.primary} onBlur={e=>e.target.style.borderColor=t.soft}/>
                   </div>
                   <div style={{ marginBottom:12 }}>
-                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>Timing</label>
-                    <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                      {medTimes.map(tm=>(
-                        <div key={tm} onClick={()=>setNewMed(p=>({...p,times:p.times.includes(tm)?p.times.filter(x=>x!==tm):[...p.times,tm]}))}
-                          style={{ padding:"7px 14px", borderRadius:10, background:newMed.times.includes(tm)?t.primary:t.secondary, color:newMed.times.includes(tm)?"#fff":t.text, fontSize:12, fontWeight:700, cursor:"pointer" }}>{tm}</div>
-                      ))}
-                    </div>
+                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>Reminder Times</label>
+                    {medTimes.map(tm=>(
+                      <div key={tm} style={{ marginBottom:8 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                          <div onClick={()=>setNewMed(p=>({...p,times:p.times.includes(tm)?p.times.filter(x=>x!==tm):[...p.times,tm]}))}
+                            style={{ width:22, height:22, borderRadius:6, border:`2px solid ${newMed.times.includes(tm)?t.primary:t.soft}`, background:newMed.times.includes(tm)?t.primary:"transparent", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", flexShrink:0 }}>
+                            {newMed.times.includes(tm) && <span style={{ color:"#fff", fontSize:13, fontWeight:800 }}>✓</span>}
+                          </div>
+                          <span style={{ fontSize:14, fontWeight:700, color:t.text, opacity:newMed.times.includes(tm)?1:0.45 }}>{tm}</span>
+                          {newMed.times.includes(tm) && (
+                            <input type="time" value={newMed.customTimes?.[tm]||"08:00"}
+                              onChange={e=>setNewMed(p=>({...p,customTimes:{...p.customTimes,[tm]:e.target.value}}))}
+                              style={{ marginLeft:"auto", padding:"6px 10px", borderRadius:10, border:`2px solid ${t.primary}`, background:t.secondary, fontSize:14, color:t.text, outline:"none", fontFamily:f }}/>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                   <div style={{ marginBottom:16 }}>
                     <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>Type</label>
@@ -1822,12 +1864,7 @@ export default function SproutApp() {
                     </div>
                   </div>
                   <div style={{ display:"flex", gap:8 }}>
-                    <button onClick={()=>{
-                      if(!newMed.name) return;
-                      setMedications(prev=>[...prev,{...newMed,id:Date.now()}]);
-                      setNewMed({name:"",dose:"",times:["Morning"],type:"regular"});
-                      setShowMedForm(false);
-                    }} disabled={!newMed.name}
+                    <button onClick={addMedication} disabled={!newMed.name}
                       style={{ flex:1, background:newMed.name?t.primary:t.soft, color:"#fff", border:"none", borderRadius:12, padding:13, fontSize:14, fontWeight:700, cursor:newMed.name?"pointer":"not-allowed", fontFamily:f }}>Save ✓</button>
                     <button onClick={()=>setShowMedForm(false)}
                       style={{ background:t.secondary, color:t.text, border:"none", borderRadius:12, padding:"13px 14px", fontSize:13, cursor:"pointer", fontFamily:f }}>Cancel</button>
