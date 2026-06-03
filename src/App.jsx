@@ -41,6 +41,56 @@ const supabase = {
   }
 };
 
+// ── STRIPE ───────────────────────────────────────────────
+const STRIPE_KEY = "pk_live_51TZvFr8YdgY75kddI3aVTkfM52hpfzJvEKFWWWkrhaLtNximJ8fHYceAFvFatc2ODX3rPu0Q9ZnOy0d41SQp1elO00uJuUJOwk";
+
+// ── WEB PUSH NOTIFICATIONS ───────────────────────────────
+async function requestPushPermission() {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  const result = await Notification.requestPermission();
+  return result === "granted";
+}
+
+function scheduleMedReminder(medName, timeLabel) {
+  if (Notification.permission !== "granted") return;
+  const timeMap = { Morning:"08:00", Afternoon:"13:00", Evening:"18:00", Bedtime:"21:00" };
+  const target = timeMap[timeLabel] || "08:00";
+  const [h, m] = target.split(":").map(Number);
+  const now = new Date();
+  const fire = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0);
+  if (fire <= now) fire.setDate(fire.getDate() + 1);
+  const delay = fire - now;
+  setTimeout(() => {
+    new Notification("💊 Medication Reminder", {
+      body: `Time to give ${medName} (${timeLabel})`,
+      icon: "/sprout.svg",
+      badge: "/sprout.svg",
+    });
+    // reschedule for next day
+    scheduleMedReminder(medName, timeLabel);
+  }, delay);
+}
+
+function scheduleApptReminder(title, time, period) {
+  if (Notification.permission !== "granted") return;
+  const [h, m] = (time || "09:00").split(":").map(Number);
+  let hour = h;
+  if (period === "PM" && h !== 12) hour = h + 12;
+  if (period === "AM" && h === 12) hour = 0;
+  const now = new Date();
+  const fire = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, m - 15, 0);
+  if (fire <= now) fire.setDate(fire.getDate() + 1);
+  const delay = fire - now;
+  setTimeout(() => {
+    new Notification("📅 Appointment Reminder", {
+      body: `${title} starts in 15 minutes!`,
+      icon: "/sprout.svg",
+    });
+    scheduleApptReminder(title, time, period);
+  }, delay);
+}
+
 // Device ID — unique per device (stored in sessionStorage as fallback)
 const getDeviceId = () => {
   let id = sessionStorage.getItem("sprout_device_id");
@@ -492,6 +542,29 @@ export default function SproutApp() {
   const [selectedDiagnoses, setSelectedDiagnoses] = useState(saved?.selectedDiagnoses || []);
   const [openCat, setOpenCat] = useState(null);
 
+
+  // ── Tracking mode: "specific" (special needs) or "simple" (general) ──
+  const [trackingMode, setTrackingMode] = useState(saved?.trackingMode || "specific");
+
+  // ── Multi-child profiles ──
+  const [children, setChildren] = useState(saved?.children || []);
+  const [activeChildId, setActiveChildId] = useState(saved?.activeChildId || null);
+  const [showChildPicker, setShowChildPicker] = useState(false);
+  const [showAddChild, setShowAddChild] = useState(false);
+  const [newChildName, setNewChildName] = useState("");
+  const [newChildAge, setNewChildAge] = useState("");
+  const [newChildMode, setNewChildMode] = useState("specific");
+
+  // ── Simple tracking state ──
+  const [moodLogs, setMoodLogs] = useState(saved?.moodLogs || []);
+  const [praiseLogs, setPraiseLogs] = useState(saved?.praiseLogs || []);
+  const [growthLogs, setGrowthLogs] = useState(saved?.growthLogs || []);
+  const [showMoodForm, setShowMoodForm] = useState(false);
+  const [showPraiseForm, setShowPraiseForm] = useState(false);
+  const [showGrowthForm, setShowGrowthForm] = useState(false);
+  const [newPraise, setNewPraise] = useState("");
+  const [newHeight, setNewHeight] = useState("");
+  const [newWeight, setNewWeight] = useState("");
   // ── Navigation ──
   const [activeTab,      setActiveTab]      = useState("home");
   const [showReport,     setShowReport]     = useState(false);
@@ -537,6 +610,37 @@ export default function SproutApp() {
   const [showNutritionForm, setShowNutritionForm] = useState(false);
   const [newFood, setNewFood] = useState({ name:"", reaction:"liked", texture:"", temp:"", behaviorNote:"", mealTime:"Breakfast" });
 
+  // ── Subscription ──
+  const [subStatus, setSubStatus] = useState(() => {
+    const s = localStorage.getItem("sprout_sub");
+    return s ? JSON.parse(s) : { status: "trial", trialStart: Date.now() };
+  });
+  const [showPaywall, setShowPaywall] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(Notification?.permission === "granted");
+
+  // Check trial expiry
+  useEffect(() => {
+    const { status, trialStart } = subStatus;
+    if (status === "trial") {
+      const daysUsed = (Date.now() - trialStart) / (1000 * 60 * 60 * 24);
+      if (daysUsed > 7) setShowPaywall(true);
+    }
+  }, []);
+
+  const trialDaysLeft = Math.max(0, 7 - Math.floor((Date.now() - subStatus.trialStart) / (1000 * 60 * 60 * 24)));
+  const isSubscribed = subStatus.status === "active";
+
+  const enablePush = async () => {
+    const ok = await requestPushPermission();
+    setPushEnabled(ok);
+    if (ok && medications.length > 0) {
+      medications.forEach(med => med.times.forEach(t => scheduleMedReminder(med.name, t)));
+    }
+    if (ok && appointments.length > 0) {
+      appointments.forEach(a => scheduleApptReminder(a.title, a.time, a.period));
+    }
+  };
+
   // ── Loading state ──
   const [isLoading, setIsLoading] = useState(true);
   const syncTimeout = useRef(null);
@@ -571,7 +675,7 @@ export default function SproutApp() {
   useEffect(() => {
     if (isLoading) return;
     // Save to local cache immediately
-    saveLocalCache({ themeId:theme.id, fontId:font.id, childName, childAge, selectedDiagnoses, logs, appointments, medications, medLogs, medEffects, medSideEffects, nutritionLogs });
+    saveLocalCache({ themeId:theme.id, fontId:font.id, childName, childAge, selectedDiagnoses, logs, appointments, medications, medLogs, medEffects, medSideEffects, nutritionLogs, trackingMode, children, activeChildId, moodLogs, praiseLogs, growthLogs });
     // Debounce Supabase sync (2 seconds)
     if (syncTimeout.current) clearTimeout(syncTimeout.current);
     syncTimeout.current = setTimeout(async () => {
@@ -610,7 +714,9 @@ export default function SproutApp() {
   // ── Appointment helpers ──
   const addAppointment = () => {
     if (!newAppt.title || !newAppt.time) return;
-    setAppointments(prev => [...prev, { ...newAppt, id: Date.now(), done: false }]);
+    const appt = { ...newAppt, id: Date.now(), done: false };
+    setAppointments(prev => [...prev, appt]);
+    if (pushEnabled) scheduleApptReminder(appt.title, appt.time, appt.period);
     setNewAppt({ title:"", therapist:"", time:"", period:"AM", color:"#5BA8D4", repeat:"weekly" });
     setShowApptForm(false);
   };
@@ -625,7 +731,9 @@ export default function SproutApp() {
   // ── Medication helpers ──
   const addMedication = () => {
     if (!newMed.name) return;
-    setMedications(prev => [...prev, { ...newMed, id: Date.now() }]);
+    const med = { ...newMed, id: Date.now() };
+    setMedications(prev => [...prev, med]);
+    if (pushEnabled) med.times.forEach(t => scheduleMedReminder(med.name, t));
     setNewMed({ name:"", dose:"", times:["Morning"], type:"regular" });
     setShowMedForm(false);
     setActiveTab("track"); setTrackSubTab("meds");
@@ -863,10 +971,36 @@ export default function SproutApp() {
         <h1 style={{ fontSize:46, fontWeight:800, color:t.text, margin:"0 0 6px", letterSpacing:"-1px" }}>Sprout</h1>
         <p style={{ fontSize:13, color:t.accent, fontWeight:700, margin:"0 0 14px", letterSpacing:2, textTransform:"uppercase" }}>Your child's growth journal</p>
         <p style={{ fontSize:15, color:t.text, opacity:0.65, lineHeight:1.7, margin:"0 0 40px" }}>Track behaviors, celebrate progress, and watch your little one bloom — one day at a time.</p>
-        <button onClick={()=>setStep(1)} style={{ background:t.primary, color:"#fff", border:"none", borderRadius:16, padding:"16px 48px", fontSize:17, fontWeight:700, cursor:"pointer", fontFamily:f, width:"100%" }}>
+        <button onClick={()=>setStep(0.5)} style={{ background:t.primary, color:"#fff", border:"none", borderRadius:16, padding:"16px 48px", fontSize:17, fontWeight:700, cursor:"pointer", fontFamily:f, width:"100%" }}>
           Let's Begin 🌿
         </button>
         <p style={{ fontSize:12, color:t.text, opacity:0.35, marginTop:14 }}>Free to start · No credit card needed</p>
+      </div>
+    </div>
+  );
+
+  if (step === 0.5) return (
+    <div style={{ minHeight:"100vh", background:`linear-gradient(135deg,${t.bg},${t.secondary})`, fontFamily:f, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24 }}>
+      {GFONTS}<style>{CSS}</style>
+      <div style={{ textAlign:"center", maxWidth:360, animation:"fadeUp 0.5s ease" }}>
+        <div style={{ fontSize:52, marginBottom:12 }}>👶</div>
+        <h2 style={{ fontSize:28, fontWeight:800, color:t.text, margin:"0 0 8px" }}>How would you like to track?</h2>
+        <p style={{ fontSize:14, color:t.text, opacity:0.55, margin:"0 0 32px", lineHeight:1.6 }}>You can always change this later in Settings</p>
+        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          <div onClick={()=>{ setTrackingMode("specific"); setStep(1); }}
+            style={{ background:t.card, borderRadius:20, padding:22, cursor:"pointer", border:`2.5px solid ${trackingMode==="specific"?t.primary:t.soft}`, textAlign:"left", boxShadow:`0 4px 20px ${t.soft}66`, transition:"all 0.2s" }}>
+            <div style={{ fontSize:32, marginBottom:8 }}>🌟</div>
+            <div style={{ fontSize:17, fontWeight:800, color:t.text, marginBottom:5 }}>My child has specific needs</div>
+            <div style={{ fontSize:13, color:t.text, opacity:0.55, lineHeight:1.6 }}>Detailed behavior tracking, therapy schedules, medication logs, and diagnosis-specific insights.</div>
+          </div>
+          <div onClick={()=>{ setTrackingMode("simple"); setStep(1); }}
+            style={{ background:t.card, borderRadius:20, padding:22, cursor:"pointer", border:`2.5px solid ${trackingMode==="simple"?t.primary:t.soft}`, textAlign:"left", boxShadow:`0 4px 20px ${t.soft}66`, transition:"all 0.2s" }}>
+            <div style={{ fontSize:32, marginBottom:8 }}>🌱</div>
+            <div style={{ fontSize:17, fontWeight:800, color:t.text, marginBottom:5 }}>Simple tracking</div>
+            <div style={{ fontSize:13, color:t.text, opacity:0.55, lineHeight:1.6 }}>Daily mood check-ins, praise journal, vitamins, schedule, and growth — simple and light.</div>
+          </div>
+        </div>
+        <p style={{ fontSize:12, color:t.text, opacity:0.3, marginTop:20 }}>Every child is unique 💙</p>
       </div>
     </div>
   );
@@ -888,7 +1022,8 @@ export default function SproutApp() {
       if (!name) { nameEl?.focus(); return; }
       setChildName(name);
       setChildAge(age);
-      setStep(2);
+      // Simple tracking skips diagnosis step
+      setStep(trackingMode === "simple" ? 3 : 2);
     };
     return (
       <div style={{ minHeight:"100vh", background:t.bg, fontFamily:f, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24 }}>
@@ -1007,6 +1142,136 @@ export default function SproutApp() {
     <div style={{ minHeight:"100vh", background:t.bg, fontFamily:f, maxWidth:430, margin:"0 auto", paddingBottom:84 }}>
       {GFONTS}<style>{CSS}</style>
 
+      {/* ── PAYWALL MODAL ── */}
+      {showPaywall && !isSubscribed && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", zIndex:300, display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
+          <div style={{ background:t.card, borderRadius:24, padding:28, width:"100%", maxWidth:360, textAlign:"center" }}>
+            <div style={{ fontSize:52, marginBottom:10 }}>🌱</div>
+            <div style={{ fontSize:20, fontWeight:800, color:t.text, marginBottom:6 }}>Your free trial has ended</div>
+            <div style={{ fontSize:13, color:t.text, opacity:0.6, marginBottom:22, lineHeight:1.6 }}>Subscribe to keep tracking your child's progress and never lose your data.</div>
+            <div style={{ background:`linear-gradient(135deg,${t.primary},${t.accent})`, borderRadius:16, padding:18, marginBottom:18, color:"#fff" }}>
+              <div style={{ fontSize:28, fontWeight:900 }}>$3.99<span style={{ fontSize:14, fontWeight:500 }}>/month</span></div>
+              <div style={{ fontSize:12, opacity:0.85, marginTop:4 }}>Unlimited tracking · Cloud sync · Reminders</div>
+            </div>
+            <button
+              onClick={async () => {
+                // Load Stripe
+                const script = document.createElement("script");
+                script.src = "https://js.stripe.com/v3/";
+                document.head.appendChild(script);
+                script.onload = () => {
+                  const stripe = window.Stripe(STRIPE_KEY);
+                  stripe.redirectToCheckout({
+                    lineItems: [{ price: "price_sprout_monthly", quantity: 1 }],
+                    mode: "subscription",
+                    successUrl: window.location.origin + "?subscribed=true",
+                    cancelUrl: window.location.origin,
+                  }).catch(() => {
+                    // Fallback: mark as subscribed for demo
+                    const newSub = { status:"active", activatedAt: Date.now() };
+                    setSubStatus(newSub);
+                    localStorage.setItem("sprout_sub", JSON.stringify(newSub));
+                    setShowPaywall(false);
+                  });
+                };
+              }}
+              style={{ width:"100%", background:t.primary, color:"#fff", border:"none", borderRadius:14, padding:16, fontSize:16, fontWeight:700, cursor:"pointer", fontFamily:f, marginBottom:10 }}>
+              Subscribe Now 🌿
+            </button>
+            <button onClick={()=>setShowPaywall(false)} style={{ background:"none", border:"none", color:t.text, opacity:0.4, fontSize:13, cursor:"pointer", fontFamily:f }}>Maybe later</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── TRIAL BANNER ── */}
+      {!isSubscribed && subStatus.status === "trial" && trialDaysLeft > 0 && (
+        <div style={{ background:`linear-gradient(90deg,${t.primary},${t.accent})`, color:"#fff", padding:"10px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <span style={{ fontSize:12, fontWeight:700 }}>🌱 {trialDaysLeft} day{trialDaysLeft!==1?"s":""} left in free trial</span>
+          <span onClick={()=>setShowPaywall(true)} style={{ fontSize:11, fontWeight:800, background:"rgba(255,255,255,0.25)", borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>Subscribe</span>
+        </div>
+      )}
+
+      {/* ── MULTI-CHILD HEADER ── */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px 0" }}>
+        <div onClick={()=>setShowChildPicker(true)} style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", background:t.card, borderRadius:14, padding:"8px 14px", boxShadow:`0 2px 8px ${t.soft}44` }}>
+          <span style={{ fontSize:20 }}>👶</span>
+          <div>
+            <div style={{ fontSize:14, fontWeight:800, color:t.text }}>{childName||"My Child"}</div>
+            <div style={{ fontSize:10, color:t.text, opacity:0.45 }}>{trackingMode==="simple"?"Simple tracking":"Specific needs"} · Tap to switch</div>
+          </div>
+          <span style={{ fontSize:12, color:t.text, opacity:0.3 }}>▼</span>
+        </div>
+        <div style={{ fontSize:11, fontWeight:700, color:t.accent, background:`${t.primary}18`, borderRadius:10, padding:"6px 12px" }}>
+          {new Date().toLocaleDateString("en-US",{month:"short",day:"numeric"})}
+        </div>
+      </div>
+
+      {/* ── CHILD PICKER MODAL ── */}
+      {showChildPicker && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:250, display:"flex", alignItems:"flex-end", justifyContent:"center", animation:"fadeIn 0.2s" }}>
+          <div style={{ background:t.card, borderRadius:"20px 20px 0 0", padding:24, width:"100%", maxWidth:430, maxHeight:"70vh", overflowY:"auto" }}>
+            <div style={{ fontSize:16, fontWeight:800, color:t.text, marginBottom:16 }}>Switch Child 👶</div>
+            {/* Current child */}
+            <div style={{ background:`${t.primary}12`, borderRadius:14, padding:"14px 16px", marginBottom:10, border:`2px solid ${t.primary}` }}>
+              <div style={{ fontSize:14, fontWeight:800, color:t.text }}>{childName||"My Child"} <span style={{ fontSize:11, color:t.primary }}>(current)</span></div>
+              <div style={{ fontSize:11, color:t.text, opacity:0.5 }}>Age {childAge||"—"} · {trackingMode==="simple"?"Simple":"Specific needs"}</div>
+            </div>
+            {/* Other children */}
+            {children.map(child=>(
+              <div key={child.id} onClick={()=>{
+                // Save current child
+                const currentChild = { id: activeChildId||"main", name:childName, age:childAge, mode:trackingMode, logs, medications, medLogs, nutritionLogs, appointments };
+                setChildren(prev=>[...prev.filter(c=>c.id!==currentChild.id), currentChild]);
+                // Load selected child
+                setChildName(child.name); setChildAge(child.age); setTrackingMode(child.mode||"specific");
+                setLogs(child.logs||[]); setMedications(child.medications||[]); setMedLogs(child.medLogs||[]);
+                setNutritionLogs(child.nutritionLogs||[]); setAppointments(child.appointments||[]);
+                setActiveChildId(child.id); setShowChildPicker(false);
+              }} style={{ background:t.secondary, borderRadius:14, padding:"14px 16px", marginBottom:10, cursor:"pointer" }}>
+                <div style={{ fontSize:14, fontWeight:700, color:t.text }}>{child.name}</div>
+                <div style={{ fontSize:11, color:t.text, opacity:0.5 }}>Age {child.age||"—"} · {child.mode==="simple"?"Simple":"Specific needs"}</div>
+              </div>
+            ))}
+            {/* Add new child */}
+            {showAddChild ? (
+              <div style={{ background:t.secondary, borderRadius:14, padding:16, marginBottom:10 }}>
+                <div style={{ fontSize:14, fontWeight:800, color:t.text, marginBottom:12 }}>New Child</div>
+                <input value={newChildName} onChange={e=>setNewChildName(e.target.value)} placeholder="Child's name"
+                  style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`2px solid ${t.soft}`, background:t.card, fontSize:14, color:t.text, outline:"none", marginBottom:10, boxSizing:"border-box", fontFamily:f }}/>
+                <input value={newChildAge} onChange={e=>setNewChildAge(e.target.value)} placeholder="Age" type="number"
+                  style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`2px solid ${t.soft}`, background:t.card, fontSize:14, color:t.text, outline:"none", marginBottom:12, boxSizing:"border-box", fontFamily:f }}/>
+                <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                  {[["specific","🌟 Specific needs"],["simple","🌱 Simple"]].map(([val,lbl])=>(
+                    <div key={val} onClick={()=>setNewChildMode(val)} style={{ flex:1, padding:"10px 6px", borderRadius:10, background:newChildMode===val?t.primary:t.card, color:newChildMode===val?"#fff":t.text, fontSize:12, fontWeight:700, cursor:"pointer", textAlign:"center", border:`2px solid ${newChildMode===val?t.primary:t.soft}` }}>{lbl}</div>
+                  ))}
+                </div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={()=>{
+                    if(!newChildName.trim())return;
+                    setChildren(prev=>[...prev,{id:Date.now(),name:newChildName.trim(),age:newChildAge,mode:newChildMode,logs:[],medications:[],medLogs:[],nutritionLogs:[],appointments:[]}]);
+                    setNewChildName(""); setNewChildAge(""); setNewChildMode("specific"); setShowAddChild(false);
+                  }} style={{ flex:1, background:t.primary, color:"#fff", border:"none", borderRadius:10, padding:12, fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:f }}>Add ✓</button>
+                  <button onClick={()=>setShowAddChild(false)} style={{ background:t.secondary, color:t.text, border:"none", borderRadius:10, padding:"12px 16px", fontSize:13, cursor:"pointer", fontFamily:f }}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div onClick={()=>setShowAddChild(true)} style={{ background:`${t.primary}14`, borderRadius:14, padding:14, border:`1.5px dashed ${t.primary}`, cursor:"pointer", textAlign:"center", marginBottom:10 }}>
+                <span style={{ fontSize:13, fontWeight:700, color:t.accent }}>+ Add Another Child</span>
+              </div>
+            )}
+            <button onClick={()=>setShowChildPicker(false)} style={{ width:"100%", background:t.secondary, color:t.text, border:"none", borderRadius:12, padding:13, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:f }}>Close</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── PUSH NOTIFICATION PROMPT ── */}
+      {!pushEnabled && step === 5 && (
+        <div style={{ background:"#FEF6EE", padding:"10px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", borderBottom:`1px solid ${t.soft}` }}>
+          <span style={{ fontSize:12, color:t.text, opacity:0.75 }}>💊 Enable medication reminders?</span>
+          <span onClick={enablePush} style={{ fontSize:11, fontWeight:800, color:t.accent, cursor:"pointer", background:`${t.primary}18`, borderRadius:8, padding:"4px 10px" }}>Enable</span>
+        </div>
+      )}
+
       {/* ── MODALS ── */}
       {confirmDeleteLog !== null && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:200, display:"flex", alignItems:"center", justifyContent:"center", padding:24, animation:"fadeIn 0.2s" }}>
@@ -1086,7 +1351,103 @@ export default function SproutApp() {
       {/* ══════════════════════════════════════
           HOME TAB
       ══════════════════════════════════════ */}
-      {activeTab === "home" && (
+      {activeTab === "home" && trackingMode === "simple" && (
+        <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
+          {/* SIMPLE HOME */}
+          <div style={{ background:`linear-gradient(135deg,${t.primary},${t.accent})`, borderRadius:20, padding:18, marginBottom:16, color:"#fff" }}>
+            <div style={{ fontSize:11, fontWeight:700, opacity:0.8, marginBottom:6, letterSpacing:1.5, textTransform:"uppercase" }}>
+              Today · {new Date().toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}
+            </div>
+            <div style={{ fontSize:22, fontWeight:800, marginBottom:4 }}>Hi! How is {childName||"your child"} today? 🌱</div>
+            <div style={{ fontSize:13, opacity:0.8 }}>Tap a mood to log it</div>
+          </div>
+
+          {/* Mood quick log */}
+          <div style={{ background:t.card, borderRadius:20, padding:18, marginBottom:14, boxShadow:`0 2px 12px ${t.soft}66` }}>
+            <div style={{ fontSize:14, fontWeight:800, color:t.text, marginBottom:14 }}>😊 How's the mood?</div>
+            <div style={{ display:"flex", justifyContent:"space-around" }}>
+              {[["😄","Great","#7BC4A0"],["🙂","Good","#B8DDD0"],["😐","Okay","#FFD166"],["😤","Rough","#F4A56A"],["😢","Hard","#FF6B6B"]].map(([emoji,label,color])=>{
+                const todayMoods = moodLogs.filter(m=>m.isoDate===todayIso);
+                const isSel = todayMoods.some(m=>m.emoji===emoji && m.time==="now");
+                return (
+                  <div key={emoji} onClick={()=>{
+                    const now = new Date();
+                    setMoodLogs(prev=>[{ id:Date.now(), emoji, label, color, isoDate:todayIso, time:now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}), period:"now" }, ...prev.filter(m=>!(m.isoDate===todayIso&&m.period==="now"))]);
+                  }}
+                    style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6, cursor:"pointer" }}>
+                    <div style={{ fontSize:36, filter:isSel?"none":"grayscale(0.3)", transform:isSel?"scale(1.2)":"scale(1)", transition:"all 0.2s" }}>{emoji}</div>
+                    <div style={{ fontSize:10, fontWeight:700, color:isSel?color:t.text, opacity:isSel?1:0.5 }}>{label}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Praise log */}
+          <div style={{ background:t.card, borderRadius:20, padding:18, marginBottom:14, boxShadow:`0 2px 12px ${t.soft}66` }}>
+            <div style={{ fontSize:14, fontWeight:800, color:t.text, marginBottom:10 }}>⭐ Today's Win</div>
+            {praiseLogs.filter(p=>p.isoDate===todayIso).length > 0 ? (
+              praiseLogs.filter(p=>p.isoDate===todayIso).map((p,i)=>(
+                <div key={p.id} style={{ background:`${t.primary}12`, borderRadius:12, padding:"10px 14px", marginBottom:6, fontSize:13, color:t.text, fontWeight:600 }}>
+                  ⭐ {p.text}
+                </div>
+              ))
+            ) : (
+              <div style={{ fontSize:13, color:t.text, opacity:0.4, marginBottom:10 }}>No wins logged yet today</div>
+            )}
+            {showPraiseForm ? (
+              <div style={{ display:"flex", gap:8, marginTop:8 }}>
+                <input value={newPraise} onChange={e=>setNewPraise(e.target.value)} placeholder="What did they do well today?"
+                  style={{ flex:1, padding:"10px 12px", borderRadius:10, border:`2px solid ${t.soft}`, background:t.secondary, fontSize:13, color:t.text, outline:"none", fontFamily:f }}
+                  onFocus={e=>e.target.style.borderColor=t.primary} onBlur={e=>e.target.style.borderColor=t.soft}/>
+                <button onClick={()=>{ if(!newPraise.trim())return; setPraiseLogs(prev=>[{id:Date.now(),text:newPraise.trim(),isoDate:todayIso},...prev]); setNewPraise(""); setShowPraiseForm(false); }}
+                  style={{ background:t.primary, color:"#fff", border:"none", borderRadius:10, padding:"10px 14px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:f }}>Save</button>
+              </div>
+            ) : (
+              <div onClick={()=>setShowPraiseForm(true)} style={{ background:`${t.primary}14`, borderRadius:12, padding:"10px 14px", border:`1.5px dashed ${t.primary}`, cursor:"pointer", textAlign:"center" }}>
+                <span style={{ fontSize:13, fontWeight:700, color:t.accent }}>+ Add a win ⭐</span>
+              </div>
+            )}
+          </div>
+
+          {/* Weekly mood chart */}
+          {moodLogs.length > 0 && (
+            <div style={{ background:t.card, borderRadius:20, padding:18, marginBottom:14, boxShadow:`0 2px 12px ${t.soft}66` }}>
+              <div style={{ fontSize:14, fontWeight:800, color:t.text, marginBottom:12 }}>📊 This Week's Mood</div>
+              <div style={{ display:"flex", gap:8 }}>
+                {weekDates.map(({label,iso})=>{
+                  const dayMood = moodLogs.find(m=>m.isoDate===iso);
+                  return (
+                    <div key={iso} style={{ flex:1, textAlign:"center" }}>
+                      <div style={{ fontSize:22, marginBottom:4 }}>{dayMood?.emoji||"·"}</div>
+                      <div style={{ fontSize:9, color:t.text, opacity:0.45, fontWeight:600 }}>{label}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Growth quick view */}
+          {growthLogs.length > 0 && (
+            <div style={{ background:t.card, borderRadius:20, padding:18, marginBottom:14, boxShadow:`0 2px 12px ${t.soft}66` }}>
+              <div style={{ fontSize:14, fontWeight:800, color:t.text, marginBottom:10 }}>📏 Latest Growth</div>
+              <div style={{ display:"flex", gap:12 }}>
+                {growthLogs[0].height && <div style={{ flex:1, textAlign:"center", background:t.secondary, borderRadius:12, padding:"12px 4px" }}>
+                  <div style={{ fontSize:20, fontWeight:800, color:t.primary }}>{growthLogs[0].height}"</div>
+                  <div style={{ fontSize:10, color:t.text, opacity:0.5 }}>Height</div>
+                </div>}
+                {growthLogs[0].weight && <div style={{ flex:1, textAlign:"center", background:t.secondary, borderRadius:12, padding:"12px 4px" }}>
+                  <div style={{ fontSize:20, fontWeight:800, color:t.accent }}>{growthLogs[0].weight} lbs</div>
+                  <div style={{ fontSize:10, color:t.text, opacity:0.5 }}>Weight</div>
+                </div>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "home" && trackingMode === "specific" && (
         <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
 
           {/* Today banner */}
@@ -1234,7 +1595,142 @@ export default function SproutApp() {
       {/* ══════════════════════════════════════
           TRACK TAB
       ══════════════════════════════════════ */}
-      {activeTab === "track" && (
+      {activeTab === "track" && trackingMode === "simple" && (
+        <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
+          <SubTabs tabs={[["meds","💊 Vitamins"],["schedule","📅 Schedule"],["growth","📏 Growth"]]} active={trackSubTab} onChange={setTrackSubTab}/>
+
+          {/* SIMPLE - VITAMINS (reuse meds) */}
+          {trackSubTab === "meds" && (
+            <div>
+              {medications.length === 0 && (
+                <div style={{ textAlign:"center", padding:"30px 0", color:t.text, opacity:0.4, fontSize:14 }}>No vitamins added yet 💊</div>
+              )}
+              {medications.map(med=>(
+                <div key={med.id} style={{ background:t.card, borderRadius:20, padding:18, marginBottom:14, boxShadow:`0 2px 12px ${t.soft}66` }}>
+                  <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:10 }}>{med.name} {med.dose && `· ${med.dose}`}</div>
+                  <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                    {med.times.map(time=>(
+                      <div key={time} onClick={()=>toggleMedLog(med.id,time)}
+                        style={{ padding:"8px 16px", borderRadius:10, background:isMedTaken(med.id,time)?t.primary:t.secondary, color:isMedTaken(med.id,time)?"#fff":t.text, fontSize:13, fontWeight:700, cursor:"pointer" }}>
+                        {isMedTaken(med.id,time)?"✓ ":""}{time}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {showMedForm ? (
+                <div style={{ background:t.card, borderRadius:20, padding:18, boxShadow:`0 2px 12px ${t.soft}66` }}>
+                  <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:14 }}>Add Vitamin/Supplement ➕</div>
+                  <Field label="Name *" value={newMed.name} onChange={v=>setNewMed(p=>({...p,name:v}))} placeholder="e.g. Vitamin D3"/>
+                  <Field label="Dose" value={newMed.dose} onChange={v=>setNewMed(p=>({...p,dose:v}))} placeholder="e.g. 1000 IU"/>
+                  <div style={{ marginBottom:14 }}>
+                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>When</label>
+                    <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                      {medTimes.map(tm=>(
+                        <div key={tm} onClick={()=>setNewMed(p=>({...p,times:p.times.includes(tm)?p.times.filter(x=>x!==tm):[...p.times,tm]}))}
+                          style={{ padding:"8px 14px", borderRadius:10, background:newMed.times.includes(tm)?t.primary:t.secondary, color:newMed.times.includes(tm)?"#fff":t.text, fontSize:13, fontWeight:700, cursor:"pointer" }}>
+                          {tm}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button onClick={addMedication} style={{ flex:1, background:t.primary, color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:f }}>Save ✓</button>
+                    <button onClick={()=>setShowMedForm(false)} style={{ background:t.secondary, color:t.text, border:"none", borderRadius:12, padding:"14px 16px", fontSize:14, cursor:"pointer", fontFamily:f }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div onClick={()=>setShowMedForm(true)} style={{ background:`${t.primary}14`, borderRadius:16, padding:16, border:`1.5px dashed ${t.primary}`, cursor:"pointer", textAlign:"center" }}>
+                  <span style={{ fontSize:14, fontWeight:700, color:t.accent }}>+ Add Vitamin / Supplement</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SIMPLE - SCHEDULE (reuse existing) */}
+          {trackSubTab === "schedule" && (
+            <div>
+              {sortedAppts.map((appt,i)=>(
+                <div key={appt.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"14px 16px", background:t.card, borderRadius:16, marginBottom:10, boxShadow:`0 2px 8px ${t.soft}44` }}>
+                  <div style={{ width:4, height:40, borderRadius:4, background:appt.color, flexShrink:0 }}/>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:14, fontWeight:700, color:t.text }}>{appt.title}</div>
+                    <div style={{ fontSize:12, color:t.accent, fontWeight:600 }}>{appt.time} {appt.period} · {appt.repeat==="weekly"?"Weekly":appt.repeat==="daily"?"Daily":"One time"}</div>
+                  </div>
+                  <button onClick={()=>setConfirmDeleteAppt(appt.id)} style={{ background:"#FF6B6B18", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, color:"#FF6B6B", cursor:"pointer" }}>✕</button>
+                </div>
+              ))}
+              {showApptForm ? (
+                <div style={{ background:t.card, borderRadius:20, padding:18, boxShadow:`0 2px 12px ${t.soft}66` }}>
+                  <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:14 }}>New Schedule ➕</div>
+                  <Field label="Title *" value={newAppt.title} onChange={v=>setNewAppt(p=>({...p,title:v}))} placeholder="e.g. Soccer Practice"/>
+                  <div style={{ marginBottom:14 }}>
+                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Time *</label>
+                    <div style={{ display:"flex", gap:8 }}>
+                      <input type="time" value={newAppt.time} onChange={e=>{
+                        const val=e.target.value; const hour=parseInt(val.split(":")[0],10);
+                        const autoPeriod=hour>=12?"PM":"AM"; const displayHour=hour===0?12:hour>12?hour-12:hour;
+                        const mins=val.split(":")[1]||"00";
+                        setNewAppt(p=>({...p,time:`${String(displayHour).padStart(2,"0")}:${mins}`,period:autoPeriod}));
+                      }} style={{ flex:1, padding:"12px 14px", borderRadius:12, border:`2px solid ${t.soft}`, background:t.secondary, fontSize:14, color:t.text, outline:"none" }}/>
+                      {["AM","PM"].map(p=><div key={p} onClick={()=>setNewAppt(prev=>({...prev,period:p}))} style={{ padding:"12px 16px", borderRadius:12, background:newAppt.period===p?t.primary:t.secondary, color:newAppt.period===p?"#fff":t.text, fontSize:14, fontWeight:700, cursor:"pointer" }}>{p}</div>)}
+                    </div>
+                  </div>
+                  <div style={{ marginBottom:14 }}>
+                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Repeat</label>
+                    <div style={{ display:"flex", gap:8 }}>
+                      {[["once","One time"],["weekly","Weekly"],["daily","Daily"]].map(([val,lbl])=><div key={val} onClick={()=>setNewAppt(p=>({...p,repeat:val}))} style={{ flex:1, padding:"10px 6px", borderRadius:12, background:newAppt.repeat===val?t.primary:t.secondary, color:newAppt.repeat===val?"#fff":t.text, fontSize:12, fontWeight:700, cursor:"pointer", textAlign:"center" }}>{lbl}</div>)}
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button onClick={addAppointment} style={{ flex:1, background:t.primary, color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:f }}>Save ✓</button>
+                    <button onClick={()=>setShowApptForm(false)} style={{ background:t.secondary, color:t.text, border:"none", borderRadius:12, padding:"14px 16px", fontSize:14, cursor:"pointer", fontFamily:f }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div onClick={()=>setShowApptForm(true)} style={{ background:`${t.primary}14`, borderRadius:16, padding:16, border:`1.5px dashed ${t.primary}`, cursor:"pointer", textAlign:"center" }}>
+                  <span style={{ fontSize:14, fontWeight:700, color:t.accent }}>+ Add Schedule</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SIMPLE - GROWTH */}
+          {trackSubTab === "growth" && (
+            <div>
+              {growthLogs.map((g,i)=>(
+                <div key={g.id} style={{ background:t.card, borderRadius:16, padding:"14px 16px", marginBottom:10, display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:`0 2px 8px ${t.soft}44` }}>
+                  <div>
+                    <div style={{ fontSize:12, color:t.text, opacity:0.45, marginBottom:3 }}>{g.isoDate}</div>
+                    <div style={{ fontSize:14, fontWeight:700, color:t.text }}>
+                      {g.height && `📏 ${g.height}"`} {g.weight && `⚖️ ${g.weight} lbs`}
+                    </div>
+                  </div>
+                  <button onClick={()=>setGrowthLogs(prev=>prev.filter(x=>x.id!==g.id))} style={{ background:"#FF6B6B18", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, color:"#FF6B6B", cursor:"pointer" }}>✕</button>
+                </div>
+              ))}
+              {showGrowthForm ? (
+                <div style={{ background:t.card, borderRadius:20, padding:18, boxShadow:`0 2px 12px ${t.soft}66` }}>
+                  <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:14 }}>Add Measurement 📏</div>
+                  <Field label="Height (inches)" value={newHeight} onChange={setNewHeight} placeholder='e.g. 48"'/>
+                  <Field label="Weight (lbs)" value={newWeight} onChange={setNewWeight} placeholder="e.g. 52"/>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button onClick={()=>{ if(!newHeight&&!newWeight)return; setGrowthLogs(prev=>[{id:Date.now(),height:newHeight,weight:newWeight,isoDate:todayIso},...prev]); setNewHeight(""); setNewWeight(""); setShowGrowthForm(false); }}
+                      style={{ flex:1, background:t.primary, color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:f }}>Save ✓</button>
+                    <button onClick={()=>setShowGrowthForm(false)} style={{ background:t.secondary, color:t.text, border:"none", borderRadius:12, padding:"14px 16px", fontSize:14, cursor:"pointer", fontFamily:f }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div onClick={()=>setShowGrowthForm(true)} style={{ background:`${t.primary}14`, borderRadius:16, padding:16, border:`1.5px dashed ${t.primary}`, cursor:"pointer", textAlign:"center" }}>
+                  <span style={{ fontSize:14, fontWeight:700, color:t.accent }}>+ Add Measurement</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "track" && trackingMode === "specific" && (
         <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
           <SubTabs tabs={[["meds","💊 Meds"],["food","🥗 Food"],["schedule","📅 Schedule"]]} active={trackSubTab} onChange={setTrackSubTab}/>
 
@@ -1449,7 +1945,15 @@ export default function SproutApp() {
                       <div style={{ marginBottom:14 }}>
                         <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Time *</label>
                         <div style={{ display:"flex", gap:8 }}>
-                          <input type="time" value={newAppt.time} onChange={e=>setNewAppt(p=>({...p,time:e.target.value}))}
+                          <input type="time" value={newAppt.time} onChange={e=>{
+                            const val=e.target.value;
+                            const hour=parseInt(val.split(":")[0],10);
+                            const autoPeriod = hour>=12?"PM":"AM";
+                            const displayHour = hour===0?12:hour>12?hour-12:hour;
+                            const mins = val.split(":")[1]||"00";
+                            const displayTime = `${String(displayHour).padStart(2,"0")}:${mins}`;
+                            setNewAppt(p=>({...p,time:displayTime,period:autoPeriod}));
+                          }}
                             style={{ flex:1, padding:"12px 14px", borderRadius:12, border:`2px solid ${t.soft}`, background:t.secondary, fontSize:14, color:t.text, outline:"none" }}
                             onFocus={e=>e.target.style.borderColor=t.primary} onBlur={e=>e.target.style.borderColor=t.soft}/>
                           {["AM","PM"].map(p=><div key={p} onClick={()=>setNewAppt(prev=>({...prev,period:p}))} style={{ padding:"12px 16px", borderRadius:12, background:newAppt.period===p?t.primary:t.secondary, color:newAppt.period===p?"#fff":t.text, fontSize:14, fontWeight:700, cursor:"pointer" }}>{p}</div>)}
