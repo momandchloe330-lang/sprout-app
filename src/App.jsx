@@ -128,9 +128,9 @@ const themes = [
   { id:"ocean",    name:"Ocean",    primary:"#5BA8D4", secondary:"#EFF7FD", accent:"#2E7FAF", bg:"#F5FAFE", card:"#FFFFFF", text:"#1A3A52", soft:"#B4D8F0", emoji:"🌊" },
 ];
 const fonts = [
-  { id:"round", name:"Friendly", style:"'Nunito', sans-serif" },
-  { id:"clean", name:"Clean",    style:"'DM Sans', sans-serif" },
-  { id:"soft",  name:"Gentle",   style:"'Quicksand', sans-serif" },
+  { id:"round", name:"Friendly", style:"-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
+  { id:"clean", name:"Clean",    style:"-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
+  { id:"soft",  name:"Gentle",   style:"-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
 ];
 
 // ── DIAGNOSIS CATEGORIES ────────────────────────────────
@@ -941,7 +941,7 @@ export default function SproutApp() {
     *{box-sizing:border-box;}
     input,textarea{font-family:${f};}
   `;
-  const GFONTS = <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=DM+Sans:wght@400;500;600;700&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet"/>;
+  const GFONTS = null; // Using system fonts for iOS compatibility
 
   // ── Sub-tab selector component ──
   const SubTabs = ({ tabs, active, onChange }) => (
