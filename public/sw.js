@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sprout-v4';
+const CACHE_NAME = 'sprout-v5';
 const ASSETS = ['/', '/index.html'];
 
 // ── Install ──────────────────────────────────────────────
