@@ -670,23 +670,54 @@ export default function SproutApp() {
   useEffect(() => {
     const init = async () => {
       setIsLoading(true);
-      const data = await loadFromSupabase(DEVICE_ID);
-      if (data && data.profile) {
-        const p = data.profile;
-        setChildName(p.child_name || "");
-        setChildAge(p.child_age || "");
-        setSelectedDiagnoses(p.selected_diagnoses || []);
-        setTheme(themes.find(t=>t.id===p.theme_id)||themes[0]);
-        setFont(fonts.find(f=>f.id===p.font_id)||fonts[0]);
+
+      // ── 로컬 캐시 먼저 로드 (즉시) ──
+      const localData = saved;
+      if (localData?.childName) {
+        setChildName(localData.childName || "");
+        setChildAge(localData.childAge || "");
+        setSelectedDiagnoses(localData.selectedDiagnoses || []);
+        setTheme(themes.find(t=>t.id===localData.themeId)||themes[0]);
+        setFont(fonts.find(f=>f.id===localData.fontId)||fonts[0]);
+        setTrackingMode(localData.trackingMode || "specific");
+        if (localData.logs?.length) setLogs(localData.logs);
+        if (localData.medications?.length) setMedications(localData.medications);
+        if (localData.medLogs?.length) setMedLogs(localData.medLogs);
+        if (localData.nutritionLogs?.length) setNutritionLogs(localData.nutritionLogs);
+        if (localData.appointments?.length) setAppointments(localData.appointments);
+        if (localData.moodLogs?.length) setMoodLogs(localData.moodLogs);
+        if (localData.praiseLogs?.length) setPraiseLogs(localData.praiseLogs);
+        if (localData.growthLogs?.length) setGrowthLogs(localData.growthLogs);
         setStep(5);
+        setIsLoading(false); // 로컬 데이터로 즉시 표시!
       }
-      if (data && data.logs?.length) setLogs(data.logs);
-      if (data && data.medications?.length) setMedications(data.medications);
-      if (data && data.medLogs?.length) setMedLogs(data.medLogs);
-      if (data && data.nutritionLogs?.length) setNutritionLogs(data.nutritionLogs);
-      if (data && data.appointments?.length) setAppointments(data.appointments);
-      if (data && data.medEffects) setMedEffects(data.medEffects);
-      if (data && data.medSideEffects) setMedSideEffects(data.medSideEffects);
+
+      // ── Supabase 백그라운드 동기화 (타임아웃 5초) ──
+      try {
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), 5000)
+        );
+        const data = await Promise.race([loadFromSupabase(DEVICE_ID), timeoutPromise]);
+        if (data && data.profile) {
+          const p = data.profile;
+          setChildName(p.child_name || "");
+          setChildAge(p.child_age || "");
+          setSelectedDiagnoses(p.selected_diagnoses || []);
+          setTheme(themes.find(t=>t.id===p.theme_id)||themes[0]);
+          setFont(fonts.find(f=>f.id===p.font_id)||fonts[0]);
+          setStep(5);
+        }
+        if (data && data.logs?.length) setLogs(data.logs);
+        if (data && data.medications?.length) setMedications(data.medications);
+        if (data && data.medLogs?.length) setMedLogs(data.medLogs);
+        if (data && data.nutritionLogs?.length) setNutritionLogs(data.nutritionLogs);
+        if (data && data.appointments?.length) setAppointments(data.appointments);
+        if (data && data.medEffects) setMedEffects(data.medEffects);
+        if (data && data.medSideEffects) setMedSideEffects(data.medSideEffects);
+      } catch (e) {
+        console.log("Supabase sync skipped:", e.message);
+      }
+
       setIsLoading(false);
     };
     init();
@@ -971,7 +1002,7 @@ export default function SproutApp() {
     </div>
   );
 
-  // ── ONBOARDING ────────────────────────────────────────
+  // ── ONBOARDING ───────────────────────────────────────────
   // Loading screen while fetching from Supabase
   if (isLoading) return (
     <div style={{ minHeight:"100vh", background:`linear-gradient(135deg,${t.bg},${t.secondary})`, fontFamily:f, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16 }}>
@@ -1374,9 +1405,9 @@ export default function SproutApp() {
         </div>
       </div>
 
-      {/* ══════════════════════════════════════
+      {/* ══════════════════════════════════════════
           HOME TAB
-      ══════════════════════════════════════ */}
+      ══════════════════════════════════════════ */}
       {activeTab === "home" && trackingMode === "simple" && (
         <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
           {/* SIMPLE HOME */}
@@ -1618,9 +1649,9 @@ export default function SproutApp() {
         </div>
       )}
 
-      {/* ══════════════════════════════════════
+      {/* ══════════════════════════════════════════
           TRACK TAB
-      ══════════════════════════════════════ */}
+      ══════════════════════════════════════════ */}
       {activeTab === "track" && trackingMode === "simple" && (
         <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
           <SubTabs tabs={[["meds","💊 Vitamins"],["schedule","📅 Schedule"],["growth","📏 Growth"]]} active={trackSubTab} onChange={setTrackSubTab}/>
@@ -2094,9 +2125,9 @@ export default function SproutApp() {
         </div>
       )}
 
-      {/* ══════════════════════════════════════
+      {/* ══════════════════════════════════════════
           PROGRESS TAB
-      ══════════════════════════════════════ */}
+      ══════════════════════════════════════════ */}
       {activeTab === "progress" && (
         <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
           <SubTabs tabs={[["behavior","📊 Behavior"],["meds","💊 Meds"],["food","🥗 Food"]]} active={progressSubTab} onChange={setProgressSubTab}/>
@@ -2475,9 +2506,9 @@ export default function SproutApp() {
         </div>
       )}
 
-      {/* ══════════════════════════════════════
+      {/* ══════════════════════════════════════════
           PROFILE TAB
-      ══════════════════════════════════════ */}
+      ══════════════════════════════════════════ */}
       {activeTab === "profile" && (
         <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
 
