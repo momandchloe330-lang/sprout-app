@@ -8,6 +8,7 @@ export default defineConfig({
               legacy({
                         targets: ['ios >= 12', 'safari >= 12', 'chrome >= 64'],
                         modernPolyfills: true,
+                          renderLegacyChunks: true,
               }),
             ],
 })
