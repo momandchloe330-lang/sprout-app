@@ -613,7 +613,7 @@ export default function SproutApp() {
   const [showApptForm,    setShowApptForm]    = useState(false);
   const [editAppt,        setEditAppt]        = useState(null);
   const [confirmDeleteAppt, setConfirmDeleteAppt] = useState(null);
-  const [newAppt, setNewAppt] = useState({ title:"", therapist:"", time:"", period:"AM", color:"#5BA8D4", repeat:"weekly" });
+  const [newAppt, setNewAppt] = useState({ title:"", therapist:"", time:"", period:"AM", color:"#5BA8D4", repeat:"weekly", apptDate:"", apptDays:[] });
   const [scheduleView,    setScheduleView]    = useState("list");
   const [selectedCalDate, setSelectedCalDate] = useState(null);
   const [calMonth, setCalMonth] = useState(new Date());
@@ -624,6 +624,7 @@ export default function SproutApp() {
   const [medEffects,     setMedEffects]     = useState(saved?.medEffects     || {});
   const [medSideEffects, setMedSideEffects] = useState(saved?.medSideEffects || {});
   const [showMedForm,    setShowMedForm]    = useState(false);
+  const [editMed,        setEditMed]        = useState(null);
   const [newMed, setNewMed] = useState({ name:"", dose:"", times:["Morning"], type:"regular", customTimes:{"Morning":"08:00","Afternoon":"13:00","Evening":"18:00","Bedtime":"21:00"} });
 
   // ── Nutrition ──
@@ -771,7 +772,7 @@ export default function SproutApp() {
     const appt = { ...newAppt, id: Date.now(), done: false };
     setAppointments(prev => [...prev, appt]);
     if (pushEnabled) scheduleApptReminder(appt.title, appt.time, appt.period);
-    setNewAppt({ title:"", therapist:"", time:"", period:"AM", color:"#5BA8D4", repeat:"weekly" });
+    setNewAppt({ title:"", therapist:"", time:"", period:"AM", color:"#5BA8D4", repeat:"weekly", apptDate:"", apptDays:[] });
     setShowApptForm(false);
   };
   const deleteAppointment = (id) => { setAppointments(prev => prev.filter(a => a.id !== id)); setConfirmDeleteAppt(null); };
@@ -792,7 +793,8 @@ export default function SproutApp() {
     setShowMedForm(false);
     setActiveTab("track"); setTrackSubTab("meds");
   };
-  const deleteMedication = (id) => setMedications(prev => prev.filter(m => m.id !== id));
+  const deleteMedication = (id) => { setMedications(prev => prev.filter(m => m.id !== id)); if (editMed?.id === id) setEditMed(null); };
+  const updateMedication = () => { if (!editMed) return; setMedications(prev => prev.map(m => m.id === editMed.id ? {...editMed} : m)); setEditMed(null); };
   const toggleMedLog = (medId, time) => {
     const key = `${medId}_${time}_${todayIso}`;
     setMedLogs(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
@@ -805,11 +807,17 @@ export default function SproutApp() {
 
   const getMedCompliance = (medId) => {
     const med = medications.find(m => m.id === medId); if (!med) return 0;
+    if (!med.times.length) return 0;
+    // 오늘 기준: 오늘 몇 번 복용했는지 / 하루 총 횟수 = 오늘 복용률
+    const takenToday = med.times.filter(tm => medLogs.includes(`${medId}_${tm}_${todayIso}`)).length;
+    return Math.round((takenToday / med.times.length) * 100);
+  };
+  const getMedMonthlyCompliance = (medId) => {
+    const med = medications.find(m => m.id === medId); if (!med) return 0;
     const now = new Date();
     const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
     const daysPassed = now.getDate();
     const expected = daysPassed * med.times.length; if (expected === 0) return 0;
-    // medLogs format: "medId_time_isoDate"
     let taken = 0;
     for (const k of medLogs) {
       if (!k.startsWith(String(medId)+"_")) continue;
@@ -1363,6 +1371,21 @@ export default function SproutApp() {
             <Field label="Title *" value={editAppt.title||""} onChange={v=>setEditAppt(p=>({...p,title:v}))} placeholder="e.g. Speech Therapy"/>
             <Field label="Therapist" value={editAppt.therapist||""} onChange={v=>setEditAppt(p=>({...p,therapist:v}))} placeholder="e.g. Ms. Jennifer"/>
             <div style={{ marginBottom:14 }}>
+              <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Date</label>
+              <input type="date" value={editAppt.apptDate||""} onChange={e=>setEditAppt(p=>({...p,apptDate:e.target.value}))}
+                style={{ width:"100%", padding:"12px 14px", borderRadius:12, border:`2px solid ${t.soft}`, background:t.secondary, fontSize:14, color:t.text, outline:"none" }}
+                onFocus={e=>e.target.style.borderColor=t.primary} onBlur={e=>e.target.style.borderColor=t.soft}/>
+            </div>
+            <div style={{ marginBottom:14 }}>
+              <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>Day of Week</label>
+              <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(day=>(
+                  <div key={day} onClick={()=>setEditAppt(p=>({...p,apptDays:p.apptDays?.includes(day)?p.apptDays.filter(d=>d!==day):[...(p.apptDays||[]),day]}))}
+                    style={{ padding:"7px 9px", borderRadius:10, background:(editAppt.apptDays||[]).includes(day)?t.primary:t.secondary, color:(editAppt.apptDays||[]).includes(day)?"#fff":t.text, fontSize:11, fontWeight:700, cursor:"pointer", minWidth:38, textAlign:"center" }}>{day}</div>
+                ))}
+              </div>
+            </div>
+            <div style={{ marginBottom:14 }}>
               <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Time *</label>
               <div style={{ display:"flex", gap:8 }}>
                 <input type="time" value={editAppt.time||""} onChange={e=>setEditAppt(p=>({...p,time:e.target.value}))}
@@ -1637,6 +1660,7 @@ export default function SproutApp() {
                         {log.note && <div style={{ fontSize:11, color:t.text, opacity:0.55, marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{log.note}</div>}
                       </div>
                       <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:5, flexShrink:0 }}>
+                        <div style={{ fontSize:10, color:t.text, opacity:0.35 }}>{log.isoDate ? new Date(log.isoDate+"T12:00:00").toLocaleDateString("en-US",{month:"2-digit",day:"2-digit"}) : ""}</div>
                         <div style={{ fontSize:10, color:t.text, opacity:0.35 }}>{log.time}</div>
                         <button onClick={()=>setConfirmDeleteLog(log.id)} style={{ background:"#FF6B6B18", border:"none", borderRadius:8, padding:"3px 8px", fontSize:11, color:"#FF6B6B", cursor:"pointer", fontFamily:f }}>Delete</button>
                       </div>
@@ -1664,15 +1688,55 @@ export default function SproutApp() {
               )}
               {medications.map(med=>(
                 <div key={med.id} style={{ background:t.card, borderRadius:20, padding:18, marginBottom:14, boxShadow:`0 2px 12px ${t.soft}66` }}>
-                  <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:10 }}>{med.name} {med.dose && `· ${med.dose}`}</div>
-                  <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                    {med.times.map(time=>(
-                      <div key={time} onClick={()=>toggleMedLog(med.id,time)}
-                        style={{ padding:"8px 16px", borderRadius:10, background:isMedTaken(med.id,time)?t.primary:t.secondary, color:isMedTaken(med.id,time)?"#fff":t.text, fontSize:13, fontWeight:700, cursor:"pointer" }}>
-                        {isMedTaken(med.id,time)?"✓ ":""}{time}
+                  {editMed?.id === med.id ? (
+                    <div>
+                      <div style={{ fontSize:14, fontWeight:800, color:t.text, marginBottom:12 }}>Edit Vitamin ✏️</div>
+                      <div style={{ marginBottom:10 }}>
+                        <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:5, textTransform:"uppercase", letterSpacing:1 }}>Name *</label>
+                        <input type="text" value={editMed.name} onChange={e=>setEditMed(p=>({...p,name:e.target.value}))}
+                          style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`2px solid ${t.primary}`, background:t.secondary, fontSize:13, color:t.text, outline:"none", fontFamily:f }}/>
                       </div>
-                    ))}
-                  </div>
+                      <div style={{ marginBottom:10 }}>
+                        <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:5, textTransform:"uppercase", letterSpacing:1 }}>Dose</label>
+                        <input type="text" value={editMed.dose} onChange={e=>setEditMed(p=>({...p,dose:e.target.value}))}
+                          style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`2px solid ${t.soft}`, background:t.secondary, fontSize:13, color:t.text, outline:"none", fontFamily:f }}/>
+                      </div>
+                      <div style={{ marginBottom:12 }}>
+                        <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Reminder Times</label>
+                        {medTimes.map(tm=>(
+                          <div key={tm} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                            <div onClick={()=>setEditMed(p=>({...p,times:p.times.includes(tm)?p.times.filter(x=>x!==tm):[...p.times,tm]}))}
+                              style={{ width:22, height:22, borderRadius:6, border:`2px solid ${editMed.times.includes(tm)?t.primary:t.soft}`, background:editMed.times.includes(tm)?t.primary:"transparent", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", flexShrink:0 }}>
+                              {editMed.times.includes(tm)&&<span style={{ color:"#fff", fontSize:12, fontWeight:800 }}>✓</span>}
+                            </div>
+                            <span style={{ fontSize:13, fontWeight:700, color:t.text, opacity:editMed.times.includes(tm)?1:0.4 }}>{tm}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ display:"flex", gap:8 }}>
+                        <button onClick={updateMedication} style={{ flex:1, background:t.primary, color:"#fff", border:"none", borderRadius:10, padding:12, fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:f }}>Save ✓</button>
+                        <button onClick={()=>setEditMed(null)} style={{ background:t.secondary, color:t.text, border:"none", borderRadius:10, padding:"12px 14px", fontSize:13, cursor:"pointer", fontFamily:f }}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                        <div style={{ fontSize:15, fontWeight:800, color:t.text }}>{med.name} {med.dose && <span style={{ fontWeight:500, opacity:0.6, fontSize:13 }}>· {med.dose}</span>}</div>
+                        <div style={{ display:"flex", gap:6 }}>
+                          <button onClick={()=>setEditMed({...med})} style={{ background:`${t.primary}18`, border:"none", borderRadius:8, padding:"5px 9px", fontSize:13, color:t.primary, cursor:"pointer" }}>✏️</button>
+                          <button onClick={()=>deleteMedication(med.id)} style={{ background:"#FF6B6B18", border:"none", borderRadius:8, padding:"5px 9px", fontSize:13, color:"#FF6B6B", cursor:"pointer" }}>🗑️</button>
+                        </div>
+                      </div>
+                      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                        {med.times.map(time=>(
+                          <div key={time} onClick={()=>toggleMedLog(med.id,time)}
+                            style={{ padding:"8px 16px", borderRadius:10, background:isMedTaken(med.id,time)?t.primary:t.secondary, color:isMedTaken(med.id,time)?"#fff":t.text, fontSize:13, fontWeight:700, cursor:"pointer" }}>
+                            {isMedTaken(med.id,time)?"✓ ":""}{time}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
               {showMedForm ? (
@@ -1712,51 +1776,138 @@ export default function SproutApp() {
             </div>
           )}
 
-          {/* SIMPLE - SCHEDULE (reuse existing) */}
+          {/* SIMPLE - SCHEDULE */}
           {trackSubTab === "schedule" && (
             <div>
-              {sortedAppts.map((appt,i)=>(
-                <div key={appt.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"14px 16px", background:t.card, borderRadius:16, marginBottom:10, boxShadow:`0 2px 8px ${t.soft}44` }}>
-                  <div style={{ width:4, height:40, borderRadius:4, background:appt.color, flexShrink:0 }}/>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:14, fontWeight:700, color:t.text }}>{appt.title}</div>
-                    <div style={{ fontSize:12, color:t.accent, fontWeight:600 }}>{appt.time} {appt.period} · {appt.repeat==="weekly"?"Weekly":appt.repeat==="daily"?"Daily":"One time"}</div>
-                  </div>
-                  <button onClick={()=>setConfirmDeleteAppt(appt.id)} style={{ background:"#FF6B6B18", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, color:"#FF6B6B", cursor:"pointer" }}>✕</button>
-                </div>
-              ))}
-              {showApptForm ? (
-                <div style={{ background:t.card, borderRadius:20, padding:18, boxShadow:`0 2px 12px ${t.soft}66` }}>
-                  <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:14 }}>New Schedule ➕</div>
-                  <Field label="Title *" value={newAppt.title} onChange={v=>setNewAppt(p=>({...p,title:v}))} placeholder="e.g. Soccer Practice"/>
-                  <div style={{ marginBottom:14 }}>
-                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Time *</label>
-                    <div style={{ display:"flex", gap:8 }}>
-                      <input type="time" value={newAppt.time} onChange={e=>{
-                        const val=e.target.value; const hour=parseInt(val.split(":")[0],10);
-                        const autoPeriod=hour>=12?"PM":"AM"; const displayHour=hour===0?12:hour>12?hour-12:hour;
-                        const mins=val.split(":")[1]||"00";
-                        setNewAppt(p=>({...p,time:`${String(displayHour).padStart(2,"0")}:${mins}`,period:autoPeriod}));
-                      }} style={{ flex:1, padding:"12px 14px", borderRadius:12, border:`2px solid ${t.soft}`, background:t.secondary, fontSize:14, color:t.text, outline:"none" }}/>
-                      {["AM","PM"].map(p=><div key={p} onClick={()=>setNewAppt(prev=>({...prev,period:p}))} style={{ padding:"12px 16px", borderRadius:12, background:newAppt.period===p?t.primary:t.secondary, color:newAppt.period===p?"#fff":t.text, fontSize:14, fontWeight:700, cursor:"pointer" }}>{p}</div>)}
+              <SubTabs tabs={[["list","📋 List"],["month","📅 Month"]]} active={scheduleView} onChange={setScheduleView}/>
+              {scheduleView === "list" && (
+                <>
+                  {sortedAppts.map((appt,i)=>(
+                    <div key={appt.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"14px 16px", background:t.card, borderRadius:16, marginBottom:10, boxShadow:`0 2px 8px ${t.soft}44` }}>
+                      <div style={{ width:4, height:48, borderRadius:4, background:appt.color, flexShrink:0 }}/>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:14, fontWeight:700, color:t.text }}>{appt.title}</div>
+                        <div style={{ fontSize:12, color:t.accent, fontWeight:600 }}>{appt.time} {appt.period} · {appt.repeat==="weekly"?"Weekly":appt.repeat==="daily"?"Daily":"One time"}</div>
+                        {appt.apptDate && <div style={{ fontSize:11, color:t.text, opacity:0.5, marginTop:2 }}>📅 {new Date(appt.apptDate+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>}
+                        {appt.apptDays?.length>0 && <div style={{ fontSize:11, color:t.text, opacity:0.5, marginTop:2 }}>🗓 {appt.apptDays.join(" · ")}</div>}
+                      </div>
+                      <button onClick={()=>setConfirmDeleteAppt(appt.id)} style={{ background:"#FF6B6B18", border:"none", borderRadius:8, padding:"6px 10px", fontSize:12, color:"#FF6B6B", cursor:"pointer" }}>✕</button>
                     </div>
-                  </div>
-                  <div style={{ marginBottom:14 }}>
-                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Repeat</label>
-                    <div style={{ display:"flex", gap:8 }}>
-                      {[["once","One time"],["weekly","Weekly"],["daily","Daily"]].map(([val,lbl])=><div key={val} onClick={()=>setNewAppt(p=>({...p,repeat:val}))} style={{ flex:1, padding:"10px 6px", borderRadius:12, background:newAppt.repeat===val?t.primary:t.secondary, color:newAppt.repeat===val?"#fff":t.text, fontSize:12, fontWeight:700, cursor:"pointer", textAlign:"center" }}>{lbl}</div>)}
+                  ))}
+                  {showApptForm ? (
+                    <div style={{ background:t.card, borderRadius:20, padding:18, boxShadow:`0 2px 12px ${t.soft}66` }}>
+                      <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:14 }}>New Schedule ➕</div>
+                      <Field label="Title *" value={newAppt.title} onChange={v=>setNewAppt(p=>({...p,title:v}))} placeholder="e.g. Soccer Practice"/>
+                      <div style={{ marginBottom:14 }}>
+                        <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Date</label>
+                        <input type="date" value={newAppt.apptDate||""} onChange={e=>setNewAppt(p=>({...p,apptDate:e.target.value}))}
+                          style={{ width:"100%", padding:"12px 14px", borderRadius:12, border:`2px solid ${t.soft}`, background:t.secondary, fontSize:14, color:t.text, outline:"none" }}
+                          onFocus={e=>e.target.style.borderColor=t.primary} onBlur={e=>e.target.style.borderColor=t.soft}/>
+                      </div>
+                      <div style={{ marginBottom:14 }}>
+                        <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>Day of Week</label>
+                        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                          {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(day=>(
+                            <div key={day} onClick={()=>setNewAppt(p=>({...p,apptDays:p.apptDays?.includes(day)?p.apptDays.filter(d=>d!==day):[...(p.apptDays||[]),day]}))}
+                              style={{ padding:"7px 10px", borderRadius:10, background:(newAppt.apptDays||[]).includes(day)?t.primary:t.secondary, color:(newAppt.apptDays||[]).includes(day)?"#fff":t.text, fontSize:12, fontWeight:700, cursor:"pointer", minWidth:40, textAlign:"center" }}>{day}</div>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{ marginBottom:14 }}>
+                        <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Time *</label>
+                        <div style={{ display:"flex", gap:8 }}>
+                          <input type="time" value={newAppt.time} onChange={e=>{
+                            const val=e.target.value; const hour=parseInt(val.split(":")[0],10);
+                            const autoPeriod=hour>=12?"PM":"AM"; const displayHour=hour===0?12:hour>12?hour-12:hour;
+                            const mins=val.split(":")[1]||"00";
+                            setNewAppt(p=>({...p,time:`${String(displayHour).padStart(2,"0")}:${mins}`,period:autoPeriod}));
+                          }} style={{ flex:1, padding:"12px 14px", borderRadius:12, border:`2px solid ${t.soft}`, background:t.secondary, fontSize:14, color:t.text, outline:"none" }}/>
+                          {["AM","PM"].map(p=><div key={p} onClick={()=>setNewAppt(prev=>({...prev,period:p}))} style={{ padding:"12px 16px", borderRadius:12, background:newAppt.period===p?t.primary:t.secondary, color:newAppt.period===p?"#fff":t.text, fontSize:14, fontWeight:700, cursor:"pointer" }}>{p}</div>)}
+                        </div>
+                      </div>
+                      <div style={{ marginBottom:14 }}>
+                        <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Repeat</label>
+                        <div style={{ display:"flex", gap:8 }}>
+                          {[["once","One time"],["weekly","Weekly"],["daily","Daily"]].map(([val,lbl])=><div key={val} onClick={()=>setNewAppt(p=>({...p,repeat:val}))} style={{ flex:1, padding:"10px 6px", borderRadius:12, background:newAppt.repeat===val?t.primary:t.secondary, color:newAppt.repeat===val?"#fff":t.text, fontSize:12, fontWeight:700, cursor:"pointer", textAlign:"center" }}>{lbl}</div>)}
+                        </div>
+                      </div>
+                      <div style={{ display:"flex", gap:8 }}>
+                        <button onClick={addAppointment} style={{ flex:1, background:t.primary, color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:f }}>Save ✓</button>
+                        <button onClick={()=>setShowApptForm(false)} style={{ background:t.secondary, color:t.text, border:"none", borderRadius:12, padding:"14px 16px", fontSize:14, cursor:"pointer", fontFamily:f }}>Cancel</button>
+                      </div>
                     </div>
-                  </div>
-                  <div style={{ display:"flex", gap:8 }}>
-                    <button onClick={addAppointment} style={{ flex:1, background:t.primary, color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:f }}>Save ✓</button>
-                    <button onClick={()=>setShowApptForm(false)} style={{ background:t.secondary, color:t.text, border:"none", borderRadius:12, padding:"14px 16px", fontSize:14, cursor:"pointer", fontFamily:f }}>Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <div onClick={()=>setShowApptForm(true)} style={{ background:`${t.primary}14`, borderRadius:16, padding:16, border:`1.5px dashed ${t.primary}`, cursor:"pointer", textAlign:"center" }}>
-                  <span style={{ fontSize:14, fontWeight:700, color:t.accent }}>+ Add Schedule</span>
-                </div>
+                  ) : (
+                    <div onClick={()=>setShowApptForm(true)} style={{ background:`${t.primary}14`, borderRadius:16, padding:16, border:`1.5px dashed ${t.primary}`, cursor:"pointer", textAlign:"center" }}>
+                      <span style={{ fontSize:14, fontWeight:700, color:t.accent }}>+ Add Schedule</span>
+                    </div>
+                  )}
+                </>
               )}
+              {scheduleView === "month" && (() => {
+                const yr=calMonth.getFullYear(), mo=calMonth.getMonth();
+                const mName=calMonth.toLocaleString("default",{month:"long"});
+                const firstDay=new Date(yr,mo,1).getDay(), days=new Date(yr,mo+1,0).getDate();
+                const tod=new Date();
+                const cells=[...Array(firstDay).fill(null),...Array.from({length:days},(_,i)=>i+1)];
+                return (
+                  <div>
+                    <div style={{ background:t.card, borderRadius:20, padding:16, marginBottom:14, boxShadow:`0 2px 12px ${t.soft}66` }}>
+                      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+                        <div onClick={()=>setCalMonth(new Date(yr,mo-1,1))} style={{ width:36, height:36, borderRadius:10, background:t.secondary, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:18 }}>‹</div>
+                        <div style={{ fontSize:16, fontWeight:800, color:t.text }}>{mName} {yr}</div>
+                        <div onClick={()=>setCalMonth(new Date(yr,mo+1,1))} style={{ width:36, height:36, borderRadius:10, background:t.secondary, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:18 }}>›</div>
+                      </div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", marginBottom:6 }}>
+                        {["S","M","T","W","T","F","S"].map((d,i)=><div key={i} style={{ textAlign:"center", fontSize:11, fontWeight:800, color:t.text, opacity:0.4, padding:"4px 0" }}>{d}</div>)}
+                      </div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:3 }}>
+                        {cells.map((day,i)=>{
+                          if(!day) return <div key={i}/>;
+                          const isSel=selectedCalDate===day, isToday=tod.getFullYear()===yr&&tod.getMonth()===mo&&tod.getDate()===day;
+                          const cellDate=new Date(yr,mo,day); const cellDow=cellDate.getDay();
+                          const dowNames=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+                          const cellIso=`${yr}-${String(mo+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+                          const dots=appointments.filter(a=>{
+                            if(a.apptDate===cellIso) return true;
+                            if(a.apptDays?.includes(dowNames[cellDow])) return true;
+                            if(a.repeat==="daily") return true;
+                            if(a.repeat==="weekly"&&cellDow===tod.getDay()) return true;
+                            return false;
+                          });
+                          return (
+                            <div key={i} onClick={()=>setSelectedCalDate(isSel?null:day)} style={{ borderRadius:10, padding:"6px 2px", textAlign:"center", cursor:"pointer", background:isSel?t.primary:isToday?t.secondary:"transparent", border:isToday&&!isSel?`2px solid ${t.primary}`:"2px solid transparent" }}>
+                              <div style={{ fontSize:13, fontWeight:isToday?800:500, color:isSel?"#fff":isToday?t.primary:t.text }}>{day}</div>
+                              {dots.length>0&&<div style={{ display:"flex", justifyContent:"center", gap:2, marginTop:2 }}>{dots.slice(0,3).map((a,ai)=><div key={ai} style={{ width:4, height:4, borderRadius:"50%", background:isSel?"rgba(255,255,255,0.8)":a.color }}/>)}</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {selectedCalDate && (
+                      <div style={{ background:t.card, borderRadius:20, padding:18, boxShadow:`0 2px 12px ${t.soft}66`, animation:"slideDown 0.2s" }}>
+                        <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:14 }}>{mName} {selectedCalDate}</div>
+                        {(() => {
+                          const cellIso=`${yr}-${String(mo+1).padStart(2,"0")}-${String(selectedCalDate).padStart(2,"0")}`;
+                          const cellDow=new Date(yr,mo,selectedCalDate).getDay();
+                          const dowNames=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+                          const todayDow=new Date().getDay();
+                          const shown=sortedAppts.filter(a=>a.apptDate===cellIso||a.apptDays?.includes(dowNames[cellDow])||a.repeat==="daily"||(a.repeat==="weekly"&&cellDow===todayDow));
+                          return shown.length===0?<div style={{ textAlign:"center", padding:"12px 0", color:t.text, opacity:0.35, fontSize:13 }}>No schedule this day</div>:shown.map((appt,i)=>(
+                            <div key={appt.id} style={{ display:"flex", gap:10, padding:"10px 0", borderBottom:i<shown.length-1?`1px solid ${t.secondary}`:"none" }}>
+                              <div style={{ width:4, height:36, borderRadius:4, background:appt.color }}/>
+                              <div style={{ flex:1 }}><div style={{ fontSize:13, fontWeight:700, color:t.text }}>{appt.title}</div></div>
+                              <div style={{ fontSize:12, fontWeight:700, color:t.accent }}>{appt.time} {appt.period}</div>
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                    )}
+                    <div onClick={()=>{ setScheduleView("list"); setShowApptForm(true); }} style={{ background:`${t.primary}14`, borderRadius:16, padding:14, border:`1.5px dashed ${t.primary}`, cursor:"pointer", textAlign:"center", marginTop:14 }}>
+                      <span style={{ fontSize:14, fontWeight:700, color:t.accent }}>+ Add Schedule</span>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -1999,6 +2150,8 @@ export default function SproutApp() {
                           <div style={{ fontSize:13, fontWeight:700, color:t.text, textDecoration:appt.done?"line-through":"none" }}>{appt.title}</div>
                           {appt.therapist&&<div style={{ fontSize:11, color:t.text, opacity:0.45, marginTop:1 }}>{appt.therapist}</div>}
                           <div style={{ fontSize:10, color:t.accent, marginTop:2, fontWeight:600 }}>{appt.time} {appt.period} · {appt.repeat==="weekly"?"Every week":appt.repeat==="daily"?"Every day":"One time"}</div>
+                          {appt.apptDate&&<div style={{ fontSize:10, color:t.text, opacity:0.4, marginTop:1 }}>📅 {new Date(appt.apptDate+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>}
+                          {appt.apptDays?.length>0&&<div style={{ fontSize:10, color:t.text, opacity:0.4, marginTop:1 }}>🗓 {appt.apptDays.join(" · ")}</div>}
                         </div>
                         <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
                           <button onClick={()=>setEditAppt({...appt})} style={{ background:`${t.primary}18`, border:"none", borderRadius:7, padding:"4px 8px", fontSize:11, color:t.primary, cursor:"pointer", fontFamily:f }}>✏️</button>
@@ -2012,6 +2165,21 @@ export default function SproutApp() {
                       <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:14 }}>New Appointment ➕</div>
                       <Field label="Title *" value={newAppt.title} onChange={v=>setNewAppt(p=>({...p,title:v}))} placeholder="e.g. Speech Therapy"/>
                       <Field label="Therapist" value={newAppt.therapist} onChange={v=>setNewAppt(p=>({...p,therapist:v}))} placeholder="e.g. Ms. Jennifer"/>
+                      <div style={{ marginBottom:14 }}>
+                        <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Date</label>
+                        <input type="date" value={newAppt.apptDate||""} onChange={e=>setNewAppt(p=>({...p,apptDate:e.target.value}))}
+                          style={{ width:"100%", padding:"12px 14px", borderRadius:12, border:`2px solid ${t.soft}`, background:t.secondary, fontSize:14, color:t.text, outline:"none" }}
+                          onFocus={e=>e.target.style.borderColor=t.primary} onBlur={e=>e.target.style.borderColor=t.soft}/>
+                      </div>
+                      <div style={{ marginBottom:14 }}>
+                        <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>Day of Week</label>
+                        <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                          {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(day=>(
+                            <div key={day} onClick={()=>setNewAppt(p=>({...p,apptDays:p.apptDays?.includes(day)?p.apptDays.filter(d=>d!==day):[...(p.apptDays||[]),day]}))}
+                              style={{ padding:"7px 9px", borderRadius:10, background:(newAppt.apptDays||[]).includes(day)?t.primary:t.secondary, color:(newAppt.apptDays||[]).includes(day)?"#fff":t.text, fontSize:11, fontWeight:700, cursor:"pointer", minWidth:38, textAlign:"center" }}>{day}</div>
+                          ))}
+                        </div>
+                      </div>
                       <div style={{ marginBottom:14 }}>
                         <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Time *</label>
                         <div style={{ display:"flex", gap:8 }}>
@@ -2041,7 +2209,7 @@ export default function SproutApp() {
                       </div>
                       <div style={{ display:"flex", gap:8 }}>
                         <button onClick={addAppointment} disabled={!newAppt.title||!newAppt.time} style={{ flex:1, background:newAppt.title&&newAppt.time?t.primary:t.soft, color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:14, fontWeight:700, cursor:newAppt.title&&newAppt.time?"pointer":"not-allowed", fontFamily:f }}>Save ✓</button>
-                        <button onClick={()=>{ setShowApptForm(false); setNewAppt({title:"",therapist:"",time:"",period:"AM",color:"#5BA8D4",repeat:"weekly"}); }} style={{ background:t.secondary, color:t.text, border:"none", borderRadius:12, padding:"14px 16px", fontSize:14, cursor:"pointer", fontFamily:f }}>Cancel</button>
+                        <button onClick={()=>{ setShowApptForm(false); setNewAppt({title:"",therapist:"",time:"",period:"AM",color:"#5BA8D4",repeat:"weekly",apptDate:"",apptDays:[]}); }} style={{ background:t.secondary, color:t.text, border:"none", borderRadius:12, padding:"14px 16px", fontSize:14, cursor:"pointer", fontFamily:f }}>Cancel</button>
                       </div>
                     </div>
                   ) : (
@@ -2344,7 +2512,7 @@ export default function SproutApp() {
                     <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:14 }}>
                       {medications.map((med,mi)=>{
                         const c=medColorPalette[mi%medColorPalette.length];
-                        const compliance=getMedCompliance(med.id);
+                        const compliance=getMedMonthlyCompliance(med.id);
                         return (
                           <div key={med.id} style={{ display:"flex", alignItems:"center", gap:6, background:c+"18", borderRadius:10, padding:"6px 10px" }}>
                             <div style={{ width:10, height:10, borderRadius:3, background:c, flexShrink:0 }}/>
@@ -2517,7 +2685,7 @@ export default function SproutApp() {
             <div style={{ fontSize:52, marginBottom:10 }}>👦</div>
             <div style={{ fontSize:22, fontWeight:800 }}>{childName||"Your Child"}</div>
             {childAge&&<div style={{ fontSize:13, opacity:0.85, marginTop:4 }}>Age {childAge}</div>}
-            {selectedDiagnoses.length>0&&<div style={{ marginTop:8, fontSize:12, opacity:0.85, lineHeight:1.7 }}>{diagnosisLabels()}</div>}
+            {trackingMode !== "simple" && selectedDiagnoses.length>0&&<div style={{ marginTop:8, fontSize:12, opacity:0.85, lineHeight:1.7 }}>{diagnosisLabels()}</div>}
           </div>
 
           {/* Child Info */}
@@ -2527,8 +2695,8 @@ export default function SproutApp() {
             <Field label="Age" value={childAge} onChange={setChildAge} placeholder="Age" type="number"/>
           </div>
 
-          {/* Diagnosis */}
-          <div style={{ background:t.card, borderRadius:20, padding:18, marginBottom:14, boxShadow:`0 2px 12px ${t.soft}66` }}>
+          {/* Diagnosis — simple 모드에서는 숨김 */}
+          {trackingMode !== "simple" && <div style={{ background:t.card, borderRadius:20, padding:18, marginBottom:14, boxShadow:`0 2px 12px ${t.soft}66` }}>
             <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:4 }}>Diagnosis 🩺</div>
             <div style={{ fontSize:12, color:t.text, opacity:0.5, marginBottom:14 }}>Tap to add or remove</div>
             {selectedDiagnoses.length>0&&(
@@ -2567,7 +2735,7 @@ export default function SproutApp() {
                 )}
               </div>
             ))}
-          </div>
+          </div>}
 
           {/* Medications — shortcut to Track */}
           <div onClick={()=>{ setActiveTab("track"); setTrackSubTab("meds"); }}
