@@ -55,7 +55,7 @@ function registerSW() {
 
 // ── PWA PUSH NOTIFICATIONS ────────────────────────────────
 async function requestPushPermission() {
-  if (!("Notification" in window)) return false;
+  if (typeof Notification === 'undefined') return false;
   if (Notification.permission === "granted") return true;
   const result = await Notification.requestPermission();
   return result === "granted";
@@ -72,7 +72,7 @@ async function scheduleViaSW(title, body, delayMs) {
   }
   // Fallback: setTimeout (only works while app is open)
   setTimeout(() => {
-    if (Notification.permission === "granted") {
+    if (typeof Notification !== 'undefined' && Notification.permission === "granted") {
       new Notification(title, { body, icon: "/icon-192.png" });
     }
   }, delayMs);
@@ -80,7 +80,7 @@ async function scheduleViaSW(title, body, delayMs) {
 }
 
 function scheduleMedReminder(medName, timeLabel, customTime) {
-  if (Notification.permission !== "granted") return;
+  if (typeof Notification === 'undefined' || Notification.permission !== "granted") return;
   const timeMap = { Morning:"08:00", Afternoon:"13:00", Evening:"18:00", Bedtime:"21:00" };
   const target = customTime || timeMap[timeLabel] || "08:00";
   const [h, m] = target.split(":").map(Number);
@@ -96,7 +96,7 @@ function scheduleMedReminder(medName, timeLabel, customTime) {
 }
 
 function scheduleApptReminder(title, time, period) {
-  if (Notification.permission !== "granted") return;
+  if (typeof Notification === 'undefined' || Notification.permission !== "granted") return;
   const [h, m] = (time || "09:00").split(":").map(Number);
   let hour = h;
   if (period === "PM" && h !== 12) hour = h + 12;
@@ -637,7 +637,7 @@ export default function SproutApp() {
     return s ? JSON.parse(s) : { status: "trial", trialStart: Date.now() };
   });
   const [showPaywall, setShowPaywall] = useState(false);
-  const [pushEnabled, setPushEnabled] = useState(Notification?.permission === "granted");
+  const [pushEnabled, setPushEnabled] = useState(typeof Notification !== 'undefined' ? Notification.permission === "granted" : false);
 
   // Check trial expiry
   useEffect(() => {
@@ -1002,7 +1002,7 @@ export default function SproutApp() {
     </div>
   );
 
-  // ── ONBOARDING ───────────────────────────────────────────
+  // ── ONBOARDING ────────────────────────────────────────
   // Loading screen while fetching from Supabase
   if (isLoading) return (
     <div style={{ minHeight:"100vh", background:`linear-gradient(135deg,${t.bg},${t.secondary})`, fontFamily:f, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16 }}>
@@ -1405,9 +1405,9 @@ export default function SproutApp() {
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════
+      {/* ══════════════════════════════════════
           HOME TAB
-      ══════════════════════════════════════════ */}
+      ══════════════════════════════════════ */}
       {activeTab === "home" && trackingMode === "simple" && (
         <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
           {/* SIMPLE HOME */}
@@ -1649,9 +1649,9 @@ export default function SproutApp() {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════
+      {/* ══════════════════════════════════════
           TRACK TAB
-      ══════════════════════════════════════════ */}
+      ══════════════════════════════════════ */}
       {activeTab === "track" && trackingMode === "simple" && (
         <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
           <SubTabs tabs={[["meds","💊 Vitamins"],["schedule","📅 Schedule"],["growth","📏 Growth"]]} active={trackSubTab} onChange={setTrackSubTab}/>
@@ -2125,9 +2125,9 @@ export default function SproutApp() {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════
+      {/* ══════════════════════════════════════
           PROGRESS TAB
-      ══════════════════════════════════════════ */}
+      ══════════════════════════════════════ */}
       {activeTab === "progress" && (
         <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
           <SubTabs tabs={[["behavior","📊 Behavior"],["meds","💊 Meds"],["food","🥗 Food"]]} active={progressSubTab} onChange={setProgressSubTab}/>
@@ -2506,9 +2506,9 @@ export default function SproutApp() {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════
+      {/* ══════════════════════════════════════
           PROFILE TAB
-      ══════════════════════════════════════════ */}
+      ══════════════════════════════════════ */}
       {activeTab === "profile" && (
         <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
 
