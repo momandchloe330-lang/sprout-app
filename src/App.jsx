@@ -583,6 +583,8 @@ export default function SproutApp() {
   const [showMoodForm, setShowMoodForm] = useState(false);
   const [showPraiseForm, setShowPraiseForm] = useState(false);
   const [showGrowthForm, setShowGrowthForm] = useState(false);
+  const [showSimpleFoodForm, setShowSimpleFoodForm] = useState(false);
+  const [newSimpleFood, setNewSimpleFood] = useState({ name:"", mealTime:"Breakfast", reaction:"liked" });
   const [newPraise, setNewPraise] = useState("");
   const [newHeight, setNewHeight] = useState("");
   const [newWeight, setNewWeight] = useState("");
@@ -625,7 +627,8 @@ export default function SproutApp() {
   const [medSideEffects, setMedSideEffects] = useState(saved?.medSideEffects || {});
   const [showMedForm,    setShowMedForm]    = useState(false);
   const [editMed,        setEditMed]        = useState(null);
-  const [newMed, setNewMed] = useState({ name:"", dose:"", times:["Morning"], type:"regular", customTimes:{"Morning":"08:00","Afternoon":"13:00","Evening":"18:00","Bedtime":"21:00"} });
+  const [newMed, setNewMed] = useState({ name:"", dose:"", times:["Morning"], type:"regular", customTimes:{"Morning":"08:00","Afternoon":"13:00","Evening":"18:00","Bedtime":"21:00"}, frequency:"daily", customFreqDays:[] });
+  const [newGrowthDate, setNewGrowthDate] = useState(todayIso);
 
   // ── Nutrition ──
   const [nutritionLogs,     setNutritionLogs]     = useState(saved?.nutritionLogs     || []);
@@ -789,7 +792,7 @@ export default function SproutApp() {
     const med = { ...newMed, id: Date.now() };
     setMedications(prev => [...prev, med]);
     if (pushEnabled) med.times.forEach(t => scheduleMedReminder(med.name, t, med.customTimes?.[t]));
-    setNewMed({ name:"", dose:"", times:["Morning"], type:"regular", customTimes:{"Morning":"08:00","Afternoon":"13:00","Evening":"18:00","Bedtime":"21:00"} });
+    setNewMed({ name:"", dose:"", times:["Morning"], type:"regular", customTimes:{"Morning":"08:00","Afternoon":"13:00","Evening":"18:00","Bedtime":"21:00"}, frequency:"daily", customFreqDays:[] });
     setShowMedForm(false);
     setActiveTab("track"); setTrackSubTab("meds");
   };
@@ -1678,7 +1681,7 @@ export default function SproutApp() {
       ══════════════════════════════════════ */}
       {activeTab === "track" && trackingMode === "simple" && (
         <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
-          <SubTabs tabs={[["meds","💊 Vitamins"],["schedule","📅 Schedule"],["growth","📏 Growth"]]} active={trackSubTab} onChange={setTrackSubTab}/>
+          <SubTabs tabs={[["meds","💊 Vitamins"],["food","🥗 Food"],["schedule","📅 Schedule"],["growth","📏 Growth"]]} active={trackSubTab} onChange={setTrackSubTab}/>
 
           {/* SIMPLE - VITAMINS (reuse meds) */}
           {trackSubTab === "meds" && (
@@ -1762,6 +1765,23 @@ export default function SproutApp() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                  <div style={{ marginBottom:16 }}>
+                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>Frequency</label>
+                    <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                      {[["daily","Daily"],["weekdays","Weekdays"],["weekends","Weekends"],["custom","Custom"]].map(([val,lbl])=>(
+                        <div key={val} onClick={()=>setNewMed(p=>({...p,frequency:val}))}
+                          style={{ padding:"8px 12px", borderRadius:10, background:newMed.frequency===val?t.primary:t.secondary, color:newMed.frequency===val?"#fff":t.text, fontSize:12, fontWeight:700, cursor:"pointer" }}>{lbl}</div>
+                      ))}
+                    </div>
+                    {newMed.frequency==="custom" && (
+                      <div style={{ display:"flex", gap:4, marginTop:8 }}>
+                        {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=>(
+                          <div key={d} onClick={()=>setNewMed(p=>({...p,customFreqDays:p.customFreqDays.includes(d)?p.customFreqDays.filter(x=>x!==d):[...p.customFreqDays,d]}))}
+                            style={{ flex:1, padding:"6px 2px", borderRadius:8, background:newMed.customFreqDays.includes(d)?t.accent:t.secondary, color:newMed.customFreqDays.includes(d)?"#fff":t.text, fontSize:10, fontWeight:700, textAlign:"center", cursor:"pointer" }}>{d}</div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div style={{ display:"flex", gap:8 }}>
                     <button onClick={addMedication} style={{ flex:1, background:t.primary, color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:f }}>Save ✓</button>
@@ -1868,10 +1888,9 @@ export default function SproutApp() {
                           const dowNames=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
                           const cellIso=`${yr}-${String(mo+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
                           const dots=appointments.filter(a=>{
-                            if(a.apptDate===cellIso) return true;
-                            if(a.apptDays?.includes(dowNames[cellDow])) return true;
                             if(a.repeat==="daily") return true;
-                            if(a.repeat==="weekly"&&cellDow===tod.getDay()) return true;
+                            if(a.apptDays?.length>0) return a.apptDays.includes(dowNames[cellDow]);
+                            if(a.apptDate) return a.apptDate===cellIso;
                             return false;
                           });
                           return (
@@ -1890,8 +1909,7 @@ export default function SproutApp() {
                           const cellIso=`${yr}-${String(mo+1).padStart(2,"0")}-${String(selectedCalDate).padStart(2,"0")}`;
                           const cellDow=new Date(yr,mo,selectedCalDate).getDay();
                           const dowNames=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-                          const todayDow=new Date().getDay();
-                          const shown=sortedAppts.filter(a=>a.apptDate===cellIso||a.apptDays?.includes(dowNames[cellDow])||a.repeat==="daily"||(a.repeat==="weekly"&&cellDow===todayDow));
+                          const shown=sortedAppts.filter(a=>a.repeat==="daily"||(a.apptDays?.length>0&&a.apptDays.includes(dowNames[cellDow]))||(a.apptDate===cellIso));
                           return shown.length===0?<div style={{ textAlign:"center", padding:"12px 0", color:t.text, opacity:0.35, fontSize:13 }}>No schedule this day</div>:shown.map((appt,i)=>(
                             <div key={appt.id} style={{ display:"flex", gap:10, padding:"10px 0", borderBottom:i<shown.length-1?`1px solid ${t.secondary}`:"none" }}>
                               <div style={{ width:4, height:36, borderRadius:4, background:appt.color }}/>
@@ -1908,6 +1926,71 @@ export default function SproutApp() {
                   </div>
                 );
               })()}
+            </div>
+          )}
+
+          {/* SIMPLE - FOOD */}
+          {trackSubTab === "food" && (
+            <div>
+              <div style={{ background:t.card, borderRadius:20, padding:18, marginBottom:14, boxShadow:`0 2px 12px ${t.soft}66` }}>
+                <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:4 }}>Today's Food Log 🥗</div>
+                <div style={{ fontSize:12, color:t.text, opacity:0.5, marginBottom:14 }}>{new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
+                {nutritionLogs.filter(l=>l.isoDate===todayIso).length===0 ? (
+                  <div style={{ textAlign:"center", padding:"16px 0", color:t.text, opacity:0.35, fontSize:13 }}>Nothing logged today 🍽️</div>
+                ) : nutritionLogs.filter(l=>l.isoDate===todayIso).map((log,i,arr)=>{
+                  const rx = foodReactions.find(r=>r.id===log.reaction);
+                  return (
+                    <div key={log.id} style={{ display:"flex", gap:10, padding:"10px 0", borderBottom:i<arr.length-1?`1px solid ${t.secondary}`:"none" }}>
+                      <div style={{ background:(rx?.color||t.primary)+"22", borderRadius:10, padding:"8px", fontSize:20, flexShrink:0 }}>
+                        {log.reaction==="liked"?"😊":log.reaction==="disliked"?"😤":log.reaction==="new"?"🆕":log.reaction==="allergy"?"⚠️":"😐"}
+                      </div>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:13, fontWeight:700, color:t.text }}>{log.name}</div>
+                        <div style={{ fontSize:11, color:rx?.color||t.accent, fontWeight:600, marginTop:1 }}>{rx?.label} · {log.mealTime}</div>
+                      </div>
+                      <button onClick={()=>deleteFoodLog(log.id)} style={{ background:"#FF6B6B18", border:"none", borderRadius:8, padding:"3px 8px", fontSize:11, color:"#FF6B6B", cursor:"pointer", fontFamily:f }}>✕</button>
+                    </div>
+                  );
+                })}
+              </div>
+              {showSimpleFoodForm ? (
+                <div style={{ background:t.card, borderRadius:20, padding:18, boxShadow:`0 2px 12px ${t.soft}66`, animation:"slideDown 0.25s" }}>
+                  <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:14 }}>Log Food 🍽️</div>
+                  <div style={{ marginBottom:12 }}>
+                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Food name *</label>
+                    <input type="text" value={newSimpleFood.name} onChange={e=>setNewSimpleFood(p=>({...p,name:e.target.value}))} placeholder="e.g. Apple, Broccoli"
+                      style={{ width:"100%", padding:"12px 14px", borderRadius:12, border:`2px solid ${t.soft}`, background:t.secondary, fontSize:14, color:t.text, outline:"none", fontFamily:f, boxSizing:"border-box" }}
+                      onFocus={e=>e.target.style.borderColor=t.primary} onBlur={e=>e.target.style.borderColor=t.soft}/>
+                  </div>
+                  <div style={{ marginBottom:12 }}>
+                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>Meal time</label>
+                    <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                      {["Breakfast","Morning Snack","Lunch","Afternoon Snack","Dinner","Evening Snack"].map(mt=>(
+                        <div key={mt} onClick={()=>setNewSimpleFood(p=>({...p,mealTime:mt}))}
+                          style={{ padding:"7px 12px", borderRadius:10, background:newSimpleFood.mealTime===mt?t.primary:t.secondary, color:newSimpleFood.mealTime===mt?"#fff":t.text, fontSize:12, fontWeight:700, cursor:"pointer" }}>{mt}</div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ marginBottom:16 }}>
+                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>Reaction</label>
+                    <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                      {foodReactions.map(r=>(
+                        <div key={r.id} onClick={()=>setNewSimpleFood(p=>({...p,reaction:r.id}))}
+                          style={{ padding:"7px 12px", borderRadius:10, background:newSimpleFood.reaction===r.id?r.color:t.secondary, color:newSimpleFood.reaction===r.id?"#fff":t.text, fontSize:12, fontWeight:700, cursor:"pointer" }}>{r.label}</div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button onClick={()=>{ if(!newSimpleFood.name.trim())return; const now=new Date(); setNutritionLogs(prev=>[{...newSimpleFood,id:Date.now(),isoDate:todayIso,time:now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}, ...prev]); setNewSimpleFood({name:"",mealTime:"Breakfast",reaction:"liked"}); setShowSimpleFoodForm(false); }}
+                      style={{ flex:1, background:t.primary, color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:f }}>Save ✓</button>
+                    <button onClick={()=>setShowSimpleFoodForm(false)} style={{ background:t.secondary, color:t.text, border:"none", borderRadius:12, padding:"14px 16px", fontSize:14, cursor:"pointer", fontFamily:f }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div onClick={()=>setShowSimpleFoodForm(true)} style={{ background:`${t.primary}14`, borderRadius:16, padding:16, border:`1.5px dashed ${t.primary}`, cursor:"pointer", textAlign:"center" }}>
+                  <span style={{ fontSize:14, fontWeight:700, color:t.accent }}>+ Log Food</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -1928,10 +2011,16 @@ export default function SproutApp() {
               {showGrowthForm ? (
                 <div style={{ background:t.card, borderRadius:20, padding:18, boxShadow:`0 2px 12px ${t.soft}66` }}>
                   <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:14 }}>Add Measurement 📏</div>
+                  <div style={{ marginBottom:14 }}>
+                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Date</label>
+                    <input type="date" value={newGrowthDate} onChange={e=>setNewGrowthDate(e.target.value)}
+                      style={{ width:"100%", padding:"12px 14px", borderRadius:12, border:`2px solid ${t.soft}`, background:t.secondary, fontSize:14, color:t.text, outline:"none", fontFamily:f, boxSizing:"border-box" }}
+                      onFocus={e=>e.target.style.borderColor=t.primary} onBlur={e=>e.target.style.borderColor=t.soft}/>
+                  </div>
                   <Field label="Height (inches)" value={newHeight} onChange={setNewHeight} placeholder='e.g. 48"'/>
                   <Field label="Weight (lbs)" value={newWeight} onChange={setNewWeight} placeholder="e.g. 52"/>
                   <div style={{ display:"flex", gap:8 }}>
-                    <button onClick={()=>{ if(!newHeight&&!newWeight)return; setGrowthLogs(prev=>[{id:Date.now(),height:newHeight,weight:newWeight,isoDate:todayIso},...prev]); setNewHeight(""); setNewWeight(""); setShowGrowthForm(false); }}
+                    <button onClick={()=>{ if(!newHeight&&!newWeight)return; setGrowthLogs(prev=>[{id:Date.now(),height:newHeight,weight:newWeight,isoDate:newGrowthDate||todayIso},...prev]); setNewHeight(""); setNewWeight(""); setNewGrowthDate(todayIso); setShowGrowthForm(false); }}
                       style={{ flex:1, background:t.primary, color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:f }}>Save ✓</button>
                     <button onClick={()=>setShowGrowthForm(false)} style={{ background:t.secondary, color:t.text, border:"none", borderRadius:12, padding:"14px 16px", fontSize:14, cursor:"pointer", fontFamily:f }}>Cancel</button>
                   </div>
@@ -2038,7 +2127,7 @@ export default function SproutApp() {
                       </div>
                     ))}
                   </div>
-                  <div style={{ marginBottom:16 }}>
+                  <div style={{ marginBottom:12 }}>
                     <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>Type</label>
                     <div style={{ display:"flex", gap:8 }}>
                       {[["regular","Daily (regular)"],["prn","As needed (PRN)"]].map(([val,lbl])=>(
@@ -2046,6 +2135,23 @@ export default function SproutApp() {
                           style={{ flex:1, padding:"9px 8px", borderRadius:10, background:newMed.type===val?t.primary:t.secondary, color:newMed.type===val?"#fff":t.text, fontSize:12, fontWeight:700, cursor:"pointer", textAlign:"center" }}>{lbl}</div>
                       ))}
                     </div>
+                  </div>
+                  <div style={{ marginBottom:16 }}>
+                    <label style={{ display:"block", fontSize:11, fontWeight:700, color:t.text, opacity:0.55, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>Frequency</label>
+                    <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                      {[["daily","Daily"],["weekdays","Weekdays"],["weekends","Weekends"],["custom","Custom"]].map(([val,lbl])=>(
+                        <div key={val} onClick={()=>setNewMed(p=>({...p,frequency:val}))}
+                          style={{ padding:"8px 12px", borderRadius:10, background:newMed.frequency===val?t.primary:t.secondary, color:newMed.frequency===val?"#fff":t.text, fontSize:12, fontWeight:700, cursor:"pointer" }}>{lbl}</div>
+                      ))}
+                    </div>
+                    {newMed.frequency==="custom" && (
+                      <div style={{ display:"flex", gap:4, marginTop:8 }}>
+                        {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=>(
+                          <div key={d} onClick={()=>setNewMed(p=>({...p,customFreqDays:p.customFreqDays.includes(d)?p.customFreqDays.filter(x=>x!==d):[...p.customFreqDays,d]}))}
+                            style={{ flex:1, padding:"6px 2px", borderRadius:8, background:newMed.customFreqDays.includes(d)?t.accent:t.secondary, color:newMed.customFreqDays.includes(d)?"#fff":t.text, fontSize:10, fontWeight:700, textAlign:"center", cursor:"pointer" }}>{d}</div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div style={{ display:"flex", gap:8 }}>
                     <button onClick={addMedication} disabled={!newMed.name}
@@ -2248,16 +2354,13 @@ export default function SproutApp() {
                                 const cellDate = new Date(yr, mo, day);
                                 const cellDow = cellDate.getDay(); // 0=Sun
                                 const todayDate = new Date();
+                                const dowNamesSpec = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+                                const cellIsoSpec = `${yr}-${String(mo+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
                                 const apptsDots = appointments.filter(a => {
                                   if (a.repeat === "daily") return true;
-                                  if (a.repeat === "weekly") {
-                                    // Check if day of week matches appointment time
-                                    // Use today as reference for weekly appointments
-                                    const refDow = todayDate.getDay();
-                                    return cellDow === refDow;
-                                  }
-                                  // "once" — only show on today's date
-                                  return yr === todayDate.getFullYear() && mo === todayDate.getMonth() && day === todayDate.getDate();
+                                  if (a.apptDays?.length > 0) return a.apptDays.includes(dowNamesSpec[cellDow]);
+                                  if (a.apptDate) return a.apptDate === cellIsoSpec;
+                                  return false;
                                 });
                                 return apptsDots.length > 0 ? (
                                   <div style={{ display:"flex", justifyContent:"center", gap:2, marginTop:2 }}>
@@ -2273,13 +2376,21 @@ export default function SproutApp() {
                     {selectedCalDate && (
                       <div style={{ background:t.card, borderRadius:20, padding:18, boxShadow:`0 2px 12px ${t.soft}66`, animation:"slideDown 0.2s" }}>
                         <div style={{ fontSize:15, fontWeight:800, color:t.text, marginBottom:14 }}>{mName} {selectedCalDate}</div>
-                        {sortedAppts.map((appt,i)=>(
-                          <div key={appt.id} style={{ display:"flex", gap:10, padding:"10px 0", borderBottom:i<sortedAppts.length-1?`1px solid ${t.secondary}`:"none" }}>
-                            <div style={{ width:4, height:36, borderRadius:4, background:appt.color }}/>
-                            <div style={{ flex:1 }}><div style={{ fontSize:13, fontWeight:700, color:t.text }}>{appt.title}</div>{appt.therapist&&<div style={{ fontSize:11, color:t.text, opacity:0.45 }}>{appt.therapist}</div>}</div>
-                            <div style={{ fontSize:12, fontWeight:700, color:t.accent }}>{appt.time} {appt.period}</div>
-                          </div>
-                        ))}
+                        {(() => {
+                          const selIso=`${yr}-${String(mo+1).padStart(2,"0")}-${String(selectedCalDate).padStart(2,"0")}`;
+                          const selDow=new Date(yr,mo,selectedCalDate).getDay();
+                          const dn=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+                          const shown=sortedAppts.filter(a=>a.repeat==="daily"||(a.apptDays?.length>0&&a.apptDays.includes(dn[selDow]))||(a.apptDate===selIso));
+                          return shown.length===0
+                            ?<div style={{ textAlign:"center", padding:"12px 0", color:t.text, opacity:0.35, fontSize:13 }}>No appointments this day</div>
+                            :shown.map((appt,i)=>(
+                              <div key={appt.id} style={{ display:"flex", gap:10, padding:"10px 0", borderBottom:i<shown.length-1?`1px solid ${t.secondary}`:"none" }}>
+                                <div style={{ width:4, height:36, borderRadius:4, background:appt.color }}/>
+                                <div style={{ flex:1 }}><div style={{ fontSize:13, fontWeight:700, color:t.text }}>{appt.title}</div>{appt.therapist&&<div style={{ fontSize:11, color:t.text, opacity:0.45 }}>{appt.therapist}</div>}</div>
+                                <div style={{ fontSize:12, fontWeight:700, color:t.accent }}>{appt.time} {appt.period}</div>
+                              </div>
+                            ));
+                        })()}
                       </div>
                     )}
                     <div onClick={()=>{ setScheduleView("list"); setShowApptForm(true); }} style={{ background:`${t.primary}14`, borderRadius:16, padding:14, border:`1.5px dashed ${t.primary}`, cursor:"pointer", textAlign:"center", marginTop:14 }}>
@@ -2294,9 +2405,185 @@ export default function SproutApp() {
       )}
 
       {/* ══════════════════════════════════════
-          PROGRESS TAB
+          PROGRESS TAB — SIMPLE
       ══════════════════════════════════════ */}
-      {activeTab === "progress" && (
+      {activeTab === "progress" && trackingMode === "simple" && (
+        <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
+          <SubTabs tabs={[["mood","😊 Mood"],["vitamins","💊 Vitamins"],["growth","📏 Growth"]]} active={progressSubTab} onChange={setProgressSubTab}/>
+
+          {/* ── MOOD SUB-TAB ── */}
+          {progressSubTab === "mood" && (
+            <div>
+              {/* Weekly mood chart */}
+              <div style={{ background:t.card, borderRadius:20, padding:18, marginBottom:14, boxShadow:`0 2px 12px ${t.soft}66` }}>
+                <div style={{ fontSize:14, fontWeight:800, color:t.text, marginBottom:12 }}>📊 This Week's Mood</div>
+                {moodLogs.length === 0 ? (
+                  <div style={{ textAlign:"center", padding:"16px 0", color:t.text, opacity:0.35, fontSize:13 }}>No mood logs yet 🌱<br/>Track mood in Home tab</div>
+                ) : (
+                  <div style={{ display:"flex", gap:8 }}>
+                    {weekDates.map(({label,iso})=>{
+                      const dayMood = moodLogs.find(m=>m.isoDate===iso);
+                      return (
+                        <div key={iso} style={{ flex:1, textAlign:"center" }}>
+                          <div style={{ fontSize:22, marginBottom:4 }}>{dayMood?.emoji||"·"}</div>
+                          <div style={{ fontSize:9, color:t.text, opacity:0.45, fontWeight:600 }}>{label}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Recent praise logs */}
+              <div style={{ background:t.card, borderRadius:20, padding:18, marginBottom:14, boxShadow:`0 2px 12px ${t.soft}66` }}>
+                <div style={{ fontSize:14, fontWeight:800, color:t.text, marginBottom:12 }}>⭐ Recent Wins</div>
+                {praiseLogs.length === 0 ? (
+                  <div style={{ textAlign:"center", padding:"12px 0", color:t.text, opacity:0.35, fontSize:13 }}>No wins logged yet 🌱</div>
+                ) : praiseLogs.slice(0,8).map((p,i,arr)=>(
+                  <div key={p.id} style={{ padding:"9px 0", borderBottom:i<arr.length-1?`1px solid ${t.secondary}`:"none" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between" }}>
+                      <div style={{ fontSize:13, fontWeight:700, color:t.text }}>⭐ {p.text}</div>
+                      <div style={{ fontSize:10, color:t.text, opacity:0.35 }}>{p.isoDate}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── VITAMINS SUB-TAB ── */}
+          {progressSubTab === "vitamins" && (() => {
+            const now2 = new Date();
+            const daysInMonth = new Date(now2.getFullYear(), now2.getMonth()+1, 0).getDate();
+            const firstDay = new Date(now2.getFullYear(), now2.getMonth(), 1).getDay();
+            const mLabel = now2.toLocaleString("en-US",{month:"long",year:"numeric"});
+            return (
+              <div>
+                {medications.length===0 ? (
+                  <div style={{ background:t.card, borderRadius:20, padding:32, textAlign:"center", boxShadow:`0 2px 12px ${t.soft}66` }}>
+                    <div style={{ fontSize:40, marginBottom:12 }}>💊</div>
+                    <div style={{ fontSize:14, fontWeight:800, color:t.text, marginBottom:6 }}>No vitamins set up</div>
+                    <button onClick={()=>{ setActiveTab("track"); setTrackSubTab("meds"); }} style={{ background:t.primary, color:"#fff", border:"none", borderRadius:12, padding:"10px 20px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:f }}>Add Vitamins →</button>
+                  </div>
+                ) : (
+                  <div style={{ background:t.card, borderRadius:20, padding:18, boxShadow:`0 2px 12px ${t.soft}66` }}>
+                    <div style={{ fontSize:14, fontWeight:800, color:t.text, marginBottom:4 }}>💊 Vitamins — {mLabel}</div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:14 }}>
+                      {medications.map((med,mi)=>{
+                        const c=medColorPalette[mi%medColorPalette.length];
+                        const compliance=getMedMonthlyCompliance(med.id);
+                        return (
+                          <div key={med.id} style={{ display:"flex", alignItems:"center", gap:6, background:c+"18", borderRadius:10, padding:"6px 10px" }}>
+                            <div style={{ width:10, height:10, borderRadius:3, background:c, flexShrink:0 }}/>
+                            <span style={{ fontSize:12, fontWeight:700, color:t.text }}>{med.name}</span>
+                            <span style={{ fontSize:11, fontWeight:800, color:compliance>=80?"#4A9B7A":compliance>=50?"#E8834A":"#FF6B6B" }}>{compliance}%</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:3, marginBottom:8 }}>
+                      {["S","M","T","W","T","F","S"].map((d,i)=><div key={i} style={{ textAlign:"center", fontSize:9, fontWeight:700, color:t.text, opacity:0.35, padding:"2px 0" }}>{d}</div>)}
+                      {Array(firstDay).fill(null).map((_,i)=><div key={`e${i}`}/>)}
+                      {Array.from({length:daysInMonth},(_,i)=>i+1).map(day=>{
+                        const isToday2=day===now2.getDate(), isFuture=day>now2.getDate();
+                        const iso=`${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+                        const statuses=medications.map((med,mi)=>({
+                          color:medColorPalette[mi%medColorPalette.length],
+                          status:!isFuture?(()=>{const tk=med.times.filter(tm=>medLogs.includes(`${med.id}_${tm}_${iso}`)).length;return tk===med.times.length?"full":tk>0?"partial":"none";})():"none"
+                        }));
+                        const fullMeds=statuses.filter(s=>s.status==="full");
+                        const anyPartial=statuses.some(s=>s.status==="partial");
+                        let bg="transparent", tc=t.text;
+                        if(!isFuture&&fullMeds.length>0&&fullMeds.length===medications.length){bg=fullMeds.length===1?fullMeds[0].color:`linear-gradient(135deg,${fullMeds[0].color} 50%,${fullMeds[Math.min(1,fullMeds.length-1)].color} 50%)`;tc="#fff";}
+                        else if(!isFuture&&anyPartial){bg="#FFD166";tc="#4A2E1A";}
+                        return (
+                          <div key={day} style={{ aspectRatio:"1", borderRadius:7, background:bg, border:isToday2?`2px solid ${t.primary}`:"2px solid transparent", display:"flex", alignItems:"center", justifyContent:"center", opacity:isFuture?0.25:1 }}>
+                            <span style={{ fontSize:9, fontWeight:isToday2?800:500, color:tc, opacity:statuses.every(s=>s.status==="none")&&!isFuture&&!isToday2?0.4:1 }}>{day}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ── GROWTH SUB-TAB ── */}
+          {progressSubTab === "growth" && (
+            <div>
+              {growthLogs.length === 0 ? (
+                <div style={{ background:t.card, borderRadius:20, padding:32, textAlign:"center", boxShadow:`0 2px 12px ${t.soft}66` }}>
+                  <div style={{ fontSize:40, marginBottom:12 }}>📏</div>
+                  <div style={{ fontSize:14, fontWeight:800, color:t.text, marginBottom:6 }}>No growth data yet</div>
+                  <button onClick={()=>{ setActiveTab("track"); setTrackSubTab("growth"); }} style={{ background:t.primary, color:"#fff", border:"none", borderRadius:12, padding:"10px 20px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:f }}>Add Measurement →</button>
+                </div>
+              ) : (() => {
+                const sorted = [...growthLogs].sort((a,b)=>a.isoDate.localeCompare(b.isoDate));
+                const hData = sorted.filter(g=>g.height&&!isNaN(parseFloat(g.height))).map(g=>({d:g.isoDate,v:parseFloat(g.height)}));
+                const wData = sorted.filter(g=>g.weight&&!isNaN(parseFloat(g.weight))).map(g=>({d:g.isoDate,v:parseFloat(g.weight)}));
+                const renderChart = (data, color, label, unit) => {
+                  if (data.length < 2) return null;
+                  const minV = Math.min(...data.map(d=>d.v));
+                  const maxV = Math.max(...data.map(d=>d.v));
+                  const range = maxV - minV || 1;
+                  const W = 280, H = 80, pad = 10;
+                  const pts = data.map((d,i)=>({
+                    x: pad + (i/(data.length-1))*(W-pad*2),
+                    y: H - pad - ((d.v-minV)/range)*(H-pad*2),
+                    v: d.v, d: d.d
+                  }));
+                  return (
+                    <div style={{ background:t.card, borderRadius:18, padding:18, marginBottom:14, boxShadow:`0 2px 12px ${t.soft}66` }}>
+                      <div style={{ fontSize:13, fontWeight:800, color:t.text, marginBottom:10 }}>{label} Chart</div>
+                      <svg width="100%" viewBox={`0 0 ${W} ${H+10}`} style={{ overflow:"visible" }}>
+                        <polyline points={pts.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round"/>
+                        {pts.map((p,i)=>(
+                          <g key={i}>
+                            <circle cx={p.x} cy={p.y} r="4" fill={color}/>
+                            <text x={p.x} y={p.y-8} textAnchor="middle" fontSize="8" fill={color} fontWeight="700">{p.v}{unit}</text>
+                          </g>
+                        ))}
+                      </svg>
+                      <div style={{ display:"flex", justifyContent:"space-between", fontSize:9, color:t.text, opacity:0.45, marginTop:4 }}>
+                        <span>{data[0].d}</span><span>{data[data.length-1].d}</span>
+                      </div>
+                      {data.length>=2&&data[data.length-1].v>data[0].v&&(
+                        <div style={{ marginTop:8, background:color+"18", borderRadius:10, padding:"6px 12px", fontSize:12, fontWeight:700, color }}>
+                          +{(data[data.length-1].v-data[0].v).toFixed(1)}{unit} since first measurement 🎉
+                        </div>
+                      )}
+                    </div>
+                  );
+                };
+                return (
+                  <div>
+                    {renderChart(hData, t.primary, "📏 Height", '"')}
+                    {renderChart(wData, t.accent, "⚖️ Weight", " lbs")}
+                    {(hData.length<2&&wData.length<2)&&(
+                      <div style={{ background:t.card, borderRadius:16, padding:18, textAlign:"center", color:t.text, opacity:0.5, fontSize:13 }}>Add at least 2 measurements to see a chart 📈</div>
+                    )}
+                    <div style={{ background:t.card, borderRadius:18, padding:18, boxShadow:`0 2px 12px ${t.soft}66` }}>
+                      <div style={{ fontSize:13, fontWeight:800, color:t.text, marginBottom:10 }}>Recent Measurements</div>
+                      {growthLogs.slice(0,5).map((g,i,arr)=>(
+                        <div key={g.id} style={{ display:"flex", justifyContent:"space-between", padding:"9px 0", borderBottom:i<arr.length-1?`1px solid ${t.secondary}`:"none" }}>
+                          <div style={{ fontSize:12, color:t.text, opacity:0.5 }}>{g.isoDate}</div>
+                          <div style={{ fontSize:13, fontWeight:700, color:t.text }}>{g.height&&`📏 ${g.height}"`} {g.weight&&`⚖️ ${g.weight} lbs`}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════
+          PROGRESS TAB — SPECIFIC
+      ══════════════════════════════════════ */}
+      {activeTab === "progress" && trackingMode !== "simple" && (
         <div style={{ padding:"18px 16px", animation:"fadeUp 0.35s ease" }}>
           <SubTabs tabs={[["behavior","📊 Behavior"],["meds","💊 Meds"],["food","🥗 Food"]]} active={progressSubTab} onChange={setProgressSubTab}/>
 
